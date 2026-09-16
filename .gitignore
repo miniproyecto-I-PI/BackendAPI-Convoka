@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+dist/
+build/
+*.egg-info/
 
 # Virtual Environment (uv / venv)
 .venv/

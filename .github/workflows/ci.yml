@@ -1,0 +1,46 @@
+name: CI - Lint, Types, Checks & Build
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    name: Quality Checks & Build
+    runs-on: ubuntu-latest
+    if: github.head_ref == 'develop'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: 1. Linting (Ruff Check)
+        run: uv run ruff check .
+
+      - name: 2. Formatting Check (Ruff Format)
+        run: uv run ruff format --check .
+
+      - name: 3. Type Checking (Mypy)
+        run: uv run mypy api config
+
+      - name: 4. Django System Validations
+        run: uv run python manage.py check
+
+      - name: 5. OpenAPI Swagger Schema Validation
+        run: uv run python manage.py spectacular --validate
+
+      - name: 6. Build Project
+        run: uv build

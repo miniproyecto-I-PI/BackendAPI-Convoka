@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 from pathlib import Path
+
 import dj_database_url
 from dotenv import load_dotenv
 
@@ -69,7 +70,7 @@ SPECTACULAR_SETTINGS = {
 
 ROOT_URLCONF = "config.urls"
 
- 
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -98,7 +99,6 @@ DATABASES = {
         conn_health_checks=True,
     )
 }
-
 
 
 # Password validation
