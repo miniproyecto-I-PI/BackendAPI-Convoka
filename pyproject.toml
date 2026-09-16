@@ -1,0 +1,62 @@
+[project]
+name = "miniproyecto-1-convoka"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Juan David Rincón López", email = "juandavidrinconl@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "dj-database-url>=3.1.2",
+    "django>=5.2.17",
+    "django-cors-headers>=4.9.0",
+    "djangorestframework>=3.18.1",
+    "drf-spectacular>=0.30.0",
+    "psycopg[binary]>=3.3.5",
+    "python-dotenv>=1.2.3",
+]
+
+[project.scripts]
+miniproyecto-1-convoka = "miniproyecto_1_convoka:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "ruff>=0.16.7",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [
+    ".git",
+    ".venv",
+    "migrations",
+    "src",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+]
+ignore = [
+    "F401",  # Unused imports in initial boilerplate templates
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+exclude = [
+    "^.venv/",
+    "^migrations/",
+]
+
