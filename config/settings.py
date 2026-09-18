@@ -142,8 +142,22 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # Permitir peticiones desde cualquier origen en desarrollo
+# CORS & CSRF settings
+CORS_ALLOWED_ORIGINS = [
+    "https://front-end-api-sigma.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://front-end-api-sigma.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
 
 # Django REST Framework settings
 REST_FRAMEWORK = {
