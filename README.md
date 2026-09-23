@@ -43,25 +43,16 @@ DATABASE_URL=postgresql://usuario:password@host:puerto/nombre_bd?sslmode=require
   dominio, añade el nuevo origen a `CORS_ALLOWED_ORIGINS` y
   `CSRF_TRUSTED_ORIGINS` en ese archivo.
 
-### Un cambio pendiente en `config/settings.py`
-
-Cambia `TIME_ZONE = "UTC"` por:
-
-```python
-TIME_ZONE = "America/Bogota"
-```
-
-Para T1 no se usa todavía `/today` (US-04), pero fijar la zona horaria ahora
-evita que las fechas de subtareas se interpreten distinto más adelante.
+El backend usa `America/Bogota` para interpretar y devolver las fechas del
+evento. La fecha objetivo de cada gestión se guarda como fecha local, sin
+componente de hora.
 
 ## Migraciones
 
-Los modelos `Event` y `Subtask` son nuevos en este sprint. Genera y aplica
-las migraciones (no vienen incluidas — Django las genera a partir de
-`api/models.py`, así que ejecútalo tú para que queden exactas a tu entorno):
+Los modelos `Event` y `Subtask` incluyen su migración inicial. Aplícala en la
+base configurada (SQLite local o PostgreSQL):
 
 ```powershell
-uv run python manage.py makemigrations api
 uv run python manage.py migrate
 ```
 
@@ -159,11 +150,33 @@ variables de entorno del proyecto en Vercel). `services/api.js` ya lee esta
 variable — no hay URLs quemadas en el código, y el resto de la app siempre
 importa las funciones de `services/api.js`, nunca hace `fetch` directo.
 
-### Formularios del frontend (aún no implementados) — cómo deben quedar configurados
+### Flujo T1 del frontend
 
-Todavía no existen los componentes de formulario, así que aquí queda la
-configuración esperada para que, cuando se creen, se integren directo con
-el backend sin sorpresas.
+La ruta `/crear` consume `POST /events` desde `frontend/src/services/api.js`.
+Envía los campos del evento junto con una lista `subtasks`; el backend valida
+todo y persiste el evento y sus gestiones en una sola transacción. Si una
+gestión no es válida, no se guarda ninguna parte del formulario.
+
+Ejemplo del cuerpo enviado por el formulario:
+
+```json
+{
+  "name": "Boda de Ana",
+  "type": "BODA",
+  "event_datetime": "2026-12-05T18:00:00-05:00",
+  "client_contact": "Ana Pérez",
+  "place": "Salón central",
+  "subtasks": [
+    { "name": "Reservar salón", "target_date": "2026-10-01", "estimated_hours": 4 },
+    { "name": "Enviar invitaciones", "target_date": "2026-10-15", "estimated_hours": 2 },
+    { "name": "Confirmar catering", "target_date": "2026-11-01", "estimated_hours": 3 }
+  ]
+}
+```
+
+La respuesta conserva el contrato estándar TS-03 y devuelve el evento con sus
+subtareas. Al guardar correctamente, el frontend navega al detalle
+`/evento/:id`, que vuelve a cargar el evento y sus gestiones desde la API.
 
 > **Nota sobre rutas:** el backlog oficial (US-01/02/03) usa `/crear` y
 > `/evento/:id`. La tabla de rutas SPA que manejan usa en cambio

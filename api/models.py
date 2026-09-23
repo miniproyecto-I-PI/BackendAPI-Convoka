@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -57,7 +59,7 @@ class Subtask(models.Model):
         "horas estimadas",
         max_digits=5,
         decimal_places=2,
-        validators=[MinValueValidator(0.01, message="Las horas deben ser mayores a 0.")],
+        validators=[MinValueValidator(Decimal("0.01"), message="Las horas deben ser mayores a 0.")],
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDIENTE)
     note = models.CharField("nota", max_length=500, blank=True)

@@ -43,11 +43,55 @@ class EventTests(APITestCase):
         self.assertEqual(response.data["data"]["name"], "Boda de Juan y María")
 
 
+class EventWithInitialSubtasksTests(APITestCase):
+    def _payload(self):
+        return {
+            "name": "Boda con plan logístico",
+            "type": "BODA",
+            "event_datetime": "2026-12-05T18:00:00-05:00",
+            "subtasks": [
+                {"name": "Reservar salón", "target_date": "2026-10-01", "estimated_hours": 4},
+                {"name": "Enviar invitaciones", "target_date": "2026-10-15", "estimated_hours": 2},
+                {"name": "Confirmar catering", "target_date": "2026-11-01", "estimated_hours": 3},
+            ],
+        }
+
+    def test_crea_evento_y_tres_subtareas_asociadas(self):
+        response = self.client.post("/api/events", self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["success"])
+        event = Event.objects.get()
+        subtasks = Subtask.objects.filter(event=event).order_by("target_date")
+        self.assertEqual(subtasks.count(), 3)
+        self.assertEqual(
+            list(subtasks.values_list("name", flat=True)),
+            ["Reservar salón", "Enviar invitaciones", "Confirmar catering"],
+        )
+        self.assertTrue(all(task.status == Subtask.Status.PENDIENTE for task in subtasks))
+        self.assertEqual(len(response.data["data"]["subtasks"]), 3)
+
+    def test_subtarea_invalida_no_deja_evento_parcial(self):
+        payload = self._payload()
+        payload["subtasks"][1]["estimated_hours"] = 0
+
+        response = self.client.post("/api/events", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(response.data["success"])
+        self.assertEqual(Event.objects.count(), 0)
+        self.assertEqual(Subtask.objects.count(), 0)
+
+
 class SubtaskTests(APITestCase):
     def setUp(self):
         response = self.client.post(
             "/api/events",
-            {"name": "Boda de Juan y María", "type": "BODA", "event_datetime": "2026-12-05T18:00:00Z"},
+            {
+                "name": "Boda de Juan y María",
+                "type": "BODA",
+                "event_datetime": "2026-12-05T18:00:00Z",
+            },
             format="json",
         )
         self.event_id = response.data["data"]["id"]
@@ -84,11 +128,15 @@ class SubtaskTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_event_id_inexistente_devuelve_404(self):
-        response = self.client.post("/api/events/9999/subtasks", self._valid_payload(), format="json")
+        response = self.client.post(
+            "/api/events/9999/subtasks", self._valid_payload(), format="json"
+        )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_subtarea_queda_asociada_al_evento_correcto(self):
-        self.client.post(f"/api/events/{self.event_id}/subtasks", self._valid_payload(), format="json")
+        self.client.post(
+            f"/api/events/{self.event_id}/subtasks", self._valid_payload(), format="json"
+        )
         subtask = Subtask.objects.get()
         self.assertEqual(subtask.event_id, self.event_id)
 
@@ -97,7 +145,11 @@ class EditDeleteTests(APITestCase):
     def setUp(self):
         response = self.client.post(
             "/api/events",
-            {"name": "Cumpleaños de Ana", "type": "CUMPLEANOS", "event_datetime": "2026-11-01T20:00:00Z"},
+            {
+                "name": "Cumpleaños de Ana",
+                "type": "CUMPLEANOS",
+                "event_datetime": "2026-11-01T20:00:00Z",
+            },
             format="json",
         )
         self.event_id = response.data["data"]["id"]
@@ -109,7 +161,9 @@ class EditDeleteTests(APITestCase):
         self.subtask_id = response.data["data"]["id"]
 
     def test_editar_evento(self):
-        response = self.client.patch(f"/api/events/{self.event_id}", {"place": "Nuevo lugar"}, format="json")
+        response = self.client.patch(
+            f"/api/events/{self.event_id}", {"place": "Nuevo lugar"}, format="json"
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(Event.objects.get(pk=self.event_id).place, "Nuevo lugar")
 

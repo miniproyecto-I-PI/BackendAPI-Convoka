@@ -1,4 +1,4 @@
-from django.db import connection
+from django.db import connection, transaction
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -65,7 +65,10 @@ class EventListCreateView(APIView):
         events = Event.objects.filter(user=get_demo_user(request))
         return success_response(EventSerializer(events, many=True).data)
 
-    @extend_schema(summary="Crear evento", request=EventSerializer, responses={201: EventSerializer})
+    @extend_schema(
+        summary="Crear evento", request=EventSerializer, responses={201: EventSerializer}
+    )
+    @transaction.atomic
     def post(self, request):
         serializer = EventSerializer(data=request.data)
         if not serializer.is_valid():
@@ -75,7 +78,28 @@ class EventListCreateView(APIView):
                 validation_details(serializer.errors),
                 status.HTTP_400_BAD_REQUEST,
             )
+
+        initial_subtasks = request.data.get("subtasks", [])
+        if not isinstance(initial_subtasks, list):
+            return error_response(
+                "validation_error",
+                "Revisa las gestiones logísticas.",
+                {"subtasks": ["Envía una lista de gestiones."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        subtasks_serializer = SubtaskSerializer(data=initial_subtasks, many=True)
+        if not subtasks_serializer.is_valid():
+            return error_response(
+                "validation_error",
+                "Revisa las gestiones logísticas.",
+                {"subtasks": subtasks_serializer.errors},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
         event = serializer.save(user=get_demo_user(request))
+        for subtask_data in subtasks_serializer.validated_data:
+            Subtask.objects.create(event=event, **subtask_data)
         return success_response(
             EventSerializer(event).data, "Evento creado.", status.HTTP_201_CREATED
         )
@@ -98,7 +122,9 @@ class EventDetailView(APIView):
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         return success_response(EventSerializer(event).data)
 
-    @extend_schema(summary="Editar evento", request=EventSerializer, responses={200: EventSerializer})
+    @extend_schema(
+        summary="Editar evento", request=EventSerializer, responses={200: EventSerializer}
+    )
     def patch(self, request, pk):
         event = self._get_event(pk)
         if event is None:
@@ -129,7 +155,9 @@ class SubtaskListCreateView(APIView):
     POST /api/events/:id/subtasks   Crea subtarea logística (US-02).
     """
 
-    @extend_schema(summary="Listar subtareas de un evento", responses={200: SubtaskSerializer(many=True)})
+    @extend_schema(
+        summary="Listar subtareas de un evento", responses={200: SubtaskSerializer(many=True)}
+    )
     def get(self, request, event_id):
         event = Event.objects.filter(pk=event_id).first()
         if event is None:
@@ -137,7 +165,9 @@ class SubtaskListCreateView(APIView):
         return success_response(SubtaskSerializer(event.subtasks.all(), many=True).data)
 
     @extend_schema(
-        summary="Crear subtarea logística", request=SubtaskSerializer, responses={201: SubtaskSerializer}
+        summary="Crear subtarea logística",
+        request=SubtaskSerializer,
+        responses={201: SubtaskSerializer},
     )
     def post(self, request, event_id):
         event = Event.objects.filter(pk=event_id).first()
@@ -167,7 +197,9 @@ class SubtaskDetailView(APIView):
     def _get_subtask(self, pk):
         return Subtask.objects.filter(pk=pk).first()
 
-    @extend_schema(summary="Editar subtarea", request=SubtaskSerializer, responses={200: SubtaskSerializer})
+    @extend_schema(
+        summary="Editar subtarea", request=SubtaskSerializer, responses={200: SubtaskSerializer}
+    )
     def patch(self, request, pk):
         subtask = self._get_subtask(pk)
         if subtask is None:
