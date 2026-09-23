@@ -125,7 +125,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "America/Bogota"
 
 USE_I18N = True
 
@@ -144,7 +144,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # CORS & CSRF settings
 CORS_ALLOWED_ORIGINS = [
-    "https://front-end-api-sigma.vercel.app",
+    "https://front-end-api-integrador-r8edi7r4f-ricky-yl-os-rigbys.vercel.app",
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
@@ -152,7 +152,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://front-end-api-sigma.vercel.app",
+    "https://front-end-api-integrador-r8edi7r4f-ricky-yl-os-rigbys.vercel.app",
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
