@@ -151,6 +151,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+# Patrones para dominios dinámicos de Vercel (producción + previews + branches).
+# Ver: https://github.com/adamchainz/django-cors-headers#cors_allowed_origin_regexes
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://front-end-api-integrador\.vercel\.app$",           # producción
+    r"^https://front-end-api-integrador-[a-z0-9-]+\.vercel\.app$", # previews y branches
+]
+
 CSRF_TRUSTED_ORIGINS = [
     "https://front-end-api-integrador.vercel.app",
     "http://localhost:3000",
