@@ -1,13 +1,23 @@
 from django.db import connection, transaction
+from django.db.models import Count, Q
+from decimal import Decimal, InvalidOperation
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .demo import get_demo_user
-from .models import Event, Subtask
+from .models import Event, Subtask, UserSettings
 from .serializers import EventSerializer, SubtaskSerializer
 from .utils import error_response, success_response, validation_details
+
+
+def events_with_progress(queryset):
+    """Annotate counts once so event list/detail responses avoid N+1 counts."""
+    return queryset.annotate(
+        progress_done=Count("subtasks", filter=Q(subtasks__status=Subtask.Status.EJECUTADA)),
+        progress_total=Count("subtasks"),
+    ).prefetch_related("subtasks")
 
 
 class HealthCheckView(APIView):
@@ -62,7 +72,7 @@ class EventListCreateView(APIView):
 
     @extend_schema(summary="Listar eventos", responses={200: EventSerializer(many=True)})
     def get(self, request):
-        events = Event.objects.filter(user=get_demo_user(request))
+        events = events_with_progress(Event.objects.filter(user=get_demo_user(request)))
         return success_response(EventSerializer(events, many=True).data)
 
     @extend_schema(
@@ -113,7 +123,7 @@ class EventDetailView(APIView):
     """
 
     def _get_event(self, pk):
-        return Event.objects.filter(pk=pk).first()
+        return events_with_progress(Event.objects.filter(pk=pk)).first()
 
     @extend_schema(summary="Detalle de evento", responses={200: EventSerializer})
     def get(self, request, pk):
@@ -147,6 +157,55 @@ class EventDetailView(APIView):
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         event.delete()
         return success_response(message="Evento eliminado.")
+
+
+class TodayView(APIView):
+    """Lista gestiones pendientes de hoy y de los próximos siete días."""
+
+    @extend_schema(summary="Listar gestiones para Hoy", responses={200: SubtaskSerializer(many=True)})
+    def get(self, request):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        today = timezone.localdate()
+        tasks = Subtask.objects.filter(
+            event__user=get_demo_user(request),
+            status=Subtask.Status.PENDIENTE,
+            target_date__lte=today + timedelta(days=7),
+        ).select_related("event").order_by("target_date", "estimated_hours")
+        data = []
+        for task in tasks:
+            item = SubtaskSerializer(task).data
+            item["event_name"] = task.event.name
+            item["event_type"] = task.event.type
+            data.append(item)
+        return success_response(data)
+
+
+class DailyLimitView(APIView):
+    """Lee o actualiza el límite diario de horas del usuario actual/demo."""
+
+    @staticmethod
+    def _settings(request):
+        return UserSettings.objects.get_or_create(user=get_demo_user(request))[0]
+
+    @extend_schema(summary="Consultar límite diario")
+    def get(self, request):
+        return success_response({"daily_limit_hours": self._settings(request).daily_limit_hours})
+
+    @extend_schema(summary="Actualizar límite diario")
+    def patch(self, request):
+        value = request.data.get("daily_limit_hours")
+        try:
+            value = Decimal(str(value))
+        except (TypeError, ValueError, InvalidOperation):
+            return error_response("validation_error", "El límite debe ser numérico.", {"daily_limit_hours": ["Ingresa un número entre 1 y 16."]}, status.HTTP_400_BAD_REQUEST)
+        if not value.is_finite() or not Decimal("1") <= value <= Decimal("16") or value.as_tuple().exponent < -1:
+            return error_response("validation_error", "El límite debe estar entre 1 y 16 horas.", {"daily_limit_hours": ["Ingresa un número entre 1 y 16."]}, status.HTTP_400_BAD_REQUEST)
+        settings = self._settings(request)
+        settings.daily_limit_hours = value
+        settings.save(update_fields=["daily_limit_hours"])
+        return success_response({"daily_limit_hours": value}, "Límite diario actualizado.")
 
 
 class SubtaskListCreateView(APIView):

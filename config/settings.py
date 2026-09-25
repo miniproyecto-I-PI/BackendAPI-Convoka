@@ -156,10 +156,12 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://front-end-api-integrador\.vercel\.app$",           # producción
     r"^https://front-end-api-integrador-[a-z0-9-]+\.vercel\.app$", # previews y branches
+    r"^https://front-end-jxjrsjexj-chompiras-team(?:-[a-z0-9-]+)?\.vercel\.app$", # proyecto Vercel actual
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "https://front-end-api-integrador.vercel.app",
+    "https://front-end-jxjrsjexj-chompiras-team.vercel.app",
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",

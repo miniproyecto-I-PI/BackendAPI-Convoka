@@ -72,3 +72,13 @@ class Subtask(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.event.name})"
+
+
+class UserSettings(models.Model):
+    """Preferencias persistidas del usuario (por ahora, usuario demo)."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="convoka_settings")
+    daily_limit_hours = models.DecimalField(max_digits=4, decimal_places=1, default=6)
+
+    def __str__(self):
+        return f"Preferencias de {self.user}"
