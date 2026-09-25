@@ -37,6 +37,13 @@ class SubtaskSerializer(serializers.ModelSerializer):
 
 class EventSerializer(serializers.ModelSerializer):
     subtasks = SubtaskSerializer(many=True, read_only=True)
+    progress = serializers.SerializerMethodField()
+
+    def get_progress(self, obj):
+        return {
+            "done": obj.progress_done if hasattr(obj, "progress_done") else obj.subtasks.filter(status=Subtask.Status.EJECUTADA).count(),
+            "total": obj.progress_total if hasattr(obj, "progress_total") else obj.subtasks.count(),
+        }
 
     class Meta:
         model = Event
@@ -49,6 +56,7 @@ class EventSerializer(serializers.ModelSerializer):
             "place",
             "user",
             "subtasks",
+            "progress",
             "created_at",
             "updated_at",
         ]

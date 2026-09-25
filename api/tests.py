@@ -42,6 +42,28 @@ class EventTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["name"], "Boda de Juan y María")
 
+    def test_progress_en_lista_y_detalle(self):
+        created = self.client.post("/api/events", {
+            **self._valid_payload(), "subtasks": [
+                {"name": "A", "target_date": "2026-10-01", "estimated_hours": 1},
+                {"name": "B", "target_date": "2026-10-02", "estimated_hours": 2},
+            ],
+        }, format="json")
+        event_id = created.data["data"]["id"]
+        task_id = created.data["data"]["subtasks"][0]["id"]
+        self.client.patch(f"/api/subtasks/{task_id}", {"status": "EJECUTADA"}, format="json")
+
+        listed = self.client.get("/api/events").data["data"]
+        detail = self.client.get(f"/api/events/{event_id}").data["data"]
+        self.assertEqual(listed[0]["progress"], {"done": 1, "total": 2})
+        self.assertEqual(detail["progress"], {"done": 1, "total": 2})
+
+    def test_progress_vacio(self):
+        created = self.client.post("/api/events", self._valid_payload(), format="json")
+        event_id = created.data["data"]["id"]
+        self.assertEqual(self.client.get("/api/events").data["data"][0]["progress"], {"done": 0, "total": 0})
+        self.assertEqual(self.client.get(f"/api/events/{event_id}").data["data"]["progress"], {"done": 0, "total": 0})
+
 
 class EventWithInitialSubtasksTests(APITestCase):
     def _payload(self):
@@ -184,3 +206,27 @@ class EditDeleteTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(Event.objects.count(), 0)
         self.assertEqual(Subtask.objects.count(), 0)
+
+
+class ConnectedEndpointsTests(APITestCase):
+    def test_today_devuelve_gestiones_pendientes_con_datos_del_evento(self):
+        response = self.client.post("/api/events", {
+            "name": "Evento de prueba", "type": "SOCIAL", "event_datetime": "2026-12-05T18:00:00Z",
+            "subtasks": [{"name": "Enviar invitaciones", "target_date": "2026-10-01", "estimated_hours": 2}],
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        today = self.client.get("/api/today")
+        self.assertEqual(today.status_code, 200)
+        self.assertEqual(today.data["data"][0]["event_name"], "Evento de prueba")
+        self.assertEqual(today.data["data"][0]["event_type"], "SOCIAL")
+
+    def test_limite_diario_se_guarda_y_se_valida(self):
+        initial = self.client.get("/api/settings/daily-limit")
+        self.assertEqual(initial.data["data"]["daily_limit_hours"], 6)
+        updated = self.client.patch("/api/settings/daily-limit", {"daily_limit_hours": 8}, format="json")
+        self.assertEqual(updated.data["data"]["daily_limit_hours"], 8)
+        self.assertEqual(self.client.get("/api/settings/daily-limit").data["data"]["daily_limit_hours"], 8)
+        fractional = self.client.patch("/api/settings/daily-limit", {"daily_limit_hours": 5.5}, format="json")
+        self.assertEqual(str(fractional.data["data"]["daily_limit_hours"]), "5.5")
+        invalid = self.client.patch("/api/settings/daily-limit", {"daily_limit_hours": 0}, format="json")
+        self.assertEqual(invalid.status_code, 400)

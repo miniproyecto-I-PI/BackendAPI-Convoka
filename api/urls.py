@@ -6,6 +6,8 @@ from .views import (
     HealthCheckView,
     SubtaskDetailView,
     SubtaskListCreateView,
+    TodayView,
+    DailyLimitView,
 )
 
 # Nota: sin "/" final a propósito, para calzar con el contrato del backlog
@@ -14,6 +16,8 @@ from .views import (
 urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health-check"),
     path("events", EventListCreateView.as_view(), name="event-list-create"),
+    path("today", TodayView.as_view(), name="today"),
+    path("settings/daily-limit", DailyLimitView.as_view(), name="daily-limit"),
     path("events/<int:pk>", EventDetailView.as_view(), name="event-detail"),
     path(
         "events/<int:event_id>/subtasks",
