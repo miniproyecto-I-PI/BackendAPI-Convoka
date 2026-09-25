@@ -54,6 +54,7 @@ class Subtask(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="subtasks")
 
     name = models.CharField("nombre de la gestión", max_length=200)
+    provider = models.CharField("proveedor", max_length=200, blank=True)
     target_date = models.DateField("fecha objetivo")
     estimated_hours = models.DecimalField(
         "horas estimadas",

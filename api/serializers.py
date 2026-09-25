@@ -12,6 +12,7 @@ class SubtaskSerializer(serializers.ModelSerializer):
             "id",
             "event",
             "name",
+            "provider",
             "target_date",
             "estimated_hours",
             "status",

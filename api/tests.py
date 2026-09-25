@@ -122,11 +122,13 @@ class SubtaskTests(APITestCase):
         return {"name": "Reservar salón", "target_date": "2026-10-01", "estimated_hours": 4}
 
     def test_crear_subtarea_valida(self):
+        payload = {**self._valid_payload(), "provider": "Catering Azul"}
         response = self.client.post(
-            f"/api/events/{self.event_id}/subtasks", self._valid_payload(), format="json"
+            f"/api/events/{self.event_id}/subtasks", payload, format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["data"]["status"], "PENDIENTE")
+        self.assertEqual(response.data["data"]["provider"], "Catering Azul")
 
     def test_nombre_vacio_no_guarda(self):
         payload = self._valid_payload()
