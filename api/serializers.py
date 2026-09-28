@@ -1,6 +1,31 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 
 from .models import Event, Subtask
+
+User = get_user_model()
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    password = serializers.CharField(required=True, write_only=True, allow_blank=False)
+
+    def validate(self, attrs):
+        identifier = (attrs.get("username") or attrs.get("email") or "").strip()
+        password = attrs.get("password") or ""
+        if not identifier or not password:
+            raise serializers.ValidationError({
+                "username": ["Ingresa tu usuario o correo."],
+                "password": ["Ingresa tu contraseña."],
+            })
+        attrs["identifier"] = identifier
+        return attrs
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "email"]
 
 
 class SubtaskSerializer(serializers.ModelSerializer):

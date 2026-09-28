@@ -13,13 +13,17 @@ from django.contrib.auth import get_user_model
 
 DEMO_USERNAME = "demo"
 DEMO_EMAIL = "demo@convoka.local"
+DEMO_PASSWORD = "Demo1234!"
 
 
 def get_demo_user(request=None):
-    """Devuelve (y crea si hace falta) el usuario demo fijo de Sprint 1."""
+    """Usuario demo con contraseña usable (US-11)."""
     User = get_user_model()
-    user, _created = User.objects.get_or_create(
+    user, created = User.objects.get_or_create(
         username=DEMO_USERNAME,
         defaults={"email": DEMO_EMAIL},
     )
+    if created:
+        user.set_password(DEMO_PASSWORD)
+        user.save()
     return user

@@ -5,11 +5,73 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from django.contrib.auth import authenticate, get_user_model
+from rest_framework.authtoken.models import Token
+
+from .serializers import LoginSerializer, UserSerializer
 
 from .demo import get_demo_user
 from .models import Event, Subtask, UserSettings
 from .serializers import EventSerializer, SubtaskSerializer
 from .utils import error_response, success_response, validation_details
+
+User = get_user_model()
+
+class LoginView(APIView):
+    """US-11 — Login local con token. Mismo mensaje exista o no el usuario."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    @extend_schema(summary="Iniciar sesión", request=LoginSerializer)
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(
+                "validation_error",
+                "Revisa los campos del formulario.",
+                validation_details(serializer.errors),
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        identifier = serializer.validated_data["identifier"]
+        password = serializer.validated_data["password"]
+
+        # Permitir username o email, sin revelar si existe.
+        login_username = identifier
+        if "@" in identifier:
+            user_obj = User.objects.filter(email__iexact=identifier).first()
+            if user_obj:
+                login_username = user_obj.username
+
+        user = authenticate(request, username=login_username, password=password)
+        if user is None:
+            return error_response(
+                "invalid_credentials",
+                "Credenciales inválidas",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return success_response(
+            {"token": token.key, "user": UserSerializer(user).data},
+            "Inicio de sesión exitoso.",
+        )
+
+
+class LogoutView(APIView):
+    """US-11 — Invalida el token actual."""
+    @extend_schema(summary="Cerrar sesión")
+    def post(self, request):
+        Token.objects.filter(user=request.user).delete()
+        return success_response(message="Sesión cerrada.")
+
+
+class MeView(APIView):
+    """US-11 — Usuario autenticado (útil para restaurar sesión al recargar)."""
+    @extend_schema(summary="Usuario autenticado", responses={200: UserSerializer})
+    def get(self, request):
+        return success_response(UserSerializer(request.user).data)
 
 
 def events_with_progress(queryset):
@@ -25,7 +87,8 @@ class HealthCheckView(APIView):
     Endpoint de salud del sistema para verificar el estado del servidor y la base de datos.
     """
 
-    permission_classes: list = []
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     @extend_schema(
         summary="Health Check del sistema",
@@ -72,7 +135,7 @@ class EventListCreateView(APIView):
 
     @extend_schema(summary="Listar eventos", responses={200: EventSerializer(many=True)})
     def get(self, request):
-        events = events_with_progress(Event.objects.filter(user=get_demo_user(request)))
+        events = events_with_progress(Event.objects.filter(user=request.user))
         return success_response(EventSerializer(events, many=True).data)
 
     @extend_schema(
@@ -107,7 +170,7 @@ class EventListCreateView(APIView):
                 status.HTTP_400_BAD_REQUEST,
             )
 
-        event = serializer.save(user=get_demo_user(request))
+        event = serializer.save(user=request.user)
         for subtask_data in subtasks_serializer.validated_data:
             Subtask.objects.create(event=event, **subtask_data)
         return success_response(
@@ -122,12 +185,12 @@ class EventDetailView(APIView):
     DELETE /api/events/:id   Eliminar evento; CASCADE elimina también sus subtareas.
     """
 
-    def _get_event(self, pk):
-        return events_with_progress(Event.objects.filter(pk=pk)).first()
+    def _get_event(self, pk, user):
+        return events_with_progress(Event.objects.filter(pk=pk, user=user)).first()
 
     @extend_schema(summary="Detalle de evento", responses={200: EventSerializer})
     def get(self, request, pk):
-        event = self._get_event(pk)
+        event = self._get_event(pk, request.user)
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         return success_response(EventSerializer(event).data)
@@ -136,7 +199,7 @@ class EventDetailView(APIView):
         summary="Editar evento", request=EventSerializer, responses={200: EventSerializer}
     )
     def patch(self, request, pk):
-        event = self._get_event(pk)
+        event = self._get_event(pk, request.user)
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         serializer = EventSerializer(event, data=request.data, partial=True)
@@ -152,7 +215,7 @@ class EventDetailView(APIView):
 
     @extend_schema(summary="Eliminar evento")
     def delete(self, request, pk):
-        event = self._get_event(pk)
+        event = self._get_event(pk, request.user)
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         event.delete()
@@ -169,7 +232,7 @@ class TodayView(APIView):
 
         today = timezone.localdate()
         tasks = Subtask.objects.filter(
-            event__user=get_demo_user(request),
+            event__user=request.user,
             status=Subtask.Status.PENDIENTE,
             target_date__lte=today + timedelta(days=7),
         ).select_related("event").order_by("target_date", "estimated_hours")
@@ -187,7 +250,7 @@ class DailyLimitView(APIView):
 
     @staticmethod
     def _settings(request):
-        return UserSettings.objects.get_or_create(user=get_demo_user(request))[0]
+        return UserSettings.objects.get_or_create(user=request.user)[0]
 
     @extend_schema(summary="Consultar límite diario")
     def get(self, request):
@@ -218,7 +281,7 @@ class SubtaskListCreateView(APIView):
         summary="Listar subtareas de un evento", responses={200: SubtaskSerializer(many=True)}
     )
     def get(self, request, event_id):
-        event = Event.objects.filter(pk=event_id).first()
+        event = Event.objects.filter(pk=event_id, user=request.user).first()
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         return success_response(SubtaskSerializer(event.subtasks.all(), many=True).data)
@@ -229,7 +292,7 @@ class SubtaskListCreateView(APIView):
         responses={201: SubtaskSerializer},
     )
     def post(self, request, event_id):
-        event = Event.objects.filter(pk=event_id).first()
+        event = Event.objects.filter(pk=event_id, user=request.user).first()
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
         serializer = SubtaskSerializer(data=request.data)
@@ -253,14 +316,14 @@ class SubtaskDetailView(APIView):
     DELETE /api/subtasks/:id   Eliminar subtarea (US-03).
     """
 
-    def _get_subtask(self, pk):
-        return Subtask.objects.filter(pk=pk).first()
+    def _get_subtask(self, pk, user):
+        return Subtask.objects.filter(pk=pk, event__user=user).first()
 
     @extend_schema(
         summary="Editar subtarea", request=SubtaskSerializer, responses={200: SubtaskSerializer}
     )
     def patch(self, request, pk):
-        subtask = self._get_subtask(pk)
+        subtask = self._get_subtask(pk, request.user)
         if subtask is None:
             return error_response("not_found", "Gestión no encontrada.", status_code=404)
         serializer = SubtaskSerializer(subtask, data=request.data, partial=True)
@@ -276,7 +339,7 @@ class SubtaskDetailView(APIView):
 
     @extend_schema(summary="Eliminar subtarea")
     def delete(self, request, pk):
-        subtask = self._get_subtask(pk)
+        subtask = self._get_subtask(pk, request.user)
         if subtask is None:
             return error_response("not_found", "Gestión no encontrada.", status_code=404)
         subtask.delete()
