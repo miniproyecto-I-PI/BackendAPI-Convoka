@@ -223,25 +223,49 @@ class EventDetailView(APIView):
 
 
 class TodayView(APIView):
-    """Lista gestiones pendientes de hoy y de los próximos siete días."""
+    UPCOMING_DAYS = 7  # Decisión UX para "Próximas"
 
-    @extend_schema(summary="Listar gestiones para Hoy", responses={200: SubtaskSerializer(many=True)})
+    @extend_schema(summary="Listar gestiones para Hoy")
     def get(self, request):
-        from django.utils import timezone
         from datetime import timedelta
+        from django.utils import timezone
 
         today = timezone.localdate()
-        tasks = Subtask.objects.filter(
+        qs = Subtask.objects.filter(
             event__user=request.user,
-            status=Subtask.Status.PENDIENTE,
-            target_date__lte=today + timedelta(days=7),
-        ).select_related("event").order_by("target_date", "estimated_hours")
+        ).exclude(
+            status=Subtask.Status.EJECUTADA,   # US-04: excluir ejecutadas
+        ).select_related("event")
+
+        # US-05 — filtros opcionales
+        event_id = request.query_params.get("event_id")
+        status_param = request.query_params.get("status")
+        if event_id:
+            qs = qs.filter(event_id=event_id)
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        qs = qs.filter(
+            target_date__lte=today + timedelta(days=self.UPCOMING_DAYS)
+        ).order_by("target_date", "estimated_hours", "id")
+
         data = []
-        for task in tasks:
+        for task in qs:
             item = SubtaskSerializer(task).data
             item["event_name"] = task.event.name
             item["event_type"] = task.event.type
+
+            # US-04 — el grupo viaja también desde el BE (FE puede ignorarlo
+            # si sigue agrupando con sortGestiones.js)
+            if task.target_date < today:
+                item["group"] = "vencidas"
+            elif task.target_date == today:
+                item["group"] = "hoy"
+            else:
+                item["group"] = "proximas"
+
             data.append(item)
+
         return success_response(data)
 
 
