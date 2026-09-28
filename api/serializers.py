@@ -31,6 +31,13 @@ class UserSerializer(serializers.ModelSerializer):
 class SubtaskSerializer(serializers.ModelSerializer):
     event = serializers.PrimaryKeyRelatedField(read_only=True)
 
+    time = serializers.TimeField(
+        source="target_time",
+        format="%H:%M",
+        allow_null=True,
+        required=False,
+    )
+
     class Meta:
         model = Subtask
         fields = [
@@ -38,9 +45,11 @@ class SubtaskSerializer(serializers.ModelSerializer):
             "event",
             "name",
             "target_date",
+            "time", 
             "estimated_hours",
             "status",
             "note",
+            "provider", 
             "created_at",
             "updated_at",
         ]
