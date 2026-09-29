@@ -5,6 +5,28 @@ from .models import Event, Subtask
 
 User = get_user_model()
 
+class RegisterSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "password"]
+
+    def validate_username(self, value):
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("Ese usuario ya está en uso.")
+        return value
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Ese correo ya está registrado.")
+        return value
+
+    def create(self, validated_data):
+        return User.objects.create_user(**validated_data)  # hashea la password
+
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
@@ -20,6 +42,7 @@ class LoginSerializer(serializers.Serializer):
             })
         attrs["identifier"] = identifier
         return attrs
+
 
 
 class UserSerializer(serializers.ModelSerializer):

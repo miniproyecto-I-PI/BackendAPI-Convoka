@@ -10,6 +10,8 @@ from django.contrib.auth import authenticate, get_user_model
 from rest_framework.authtoken.models import Token
 
 from .serializers import LoginSerializer, UserSerializer
+from .serializers import RegisterSerializer
+
 
 from .demo import get_demo_user
 from .models import Event, Subtask, UserSettings
@@ -17,6 +19,29 @@ from .serializers import EventSerializer, SubtaskSerializer
 from .utils import error_response, success_response, validation_details
 
 User = get_user_model()
+
+class RegisterView(APIView):
+    """Registro de organizador nuevo (auto-login tras crear la cuenta)."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    @extend_schema(summary="Crear cuenta", request=RegisterSerializer)
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(
+                "validation_error",
+                "Revisa los campos del formulario.",
+                validation_details(serializer.errors),
+                status.HTTP_400_BAD_REQUEST,
+            )
+        user = serializer.save()
+        token, _ = Token.objects.get_or_create(user=user)
+        return success_response(
+            {"token": token.key, "user": UserSerializer(user).data},
+            "Cuenta creada correctamente.",
+            status.HTTP_201_CREATED,
+        )
 
 class LoginView(APIView):
     """US-11 — Login local con token. Mismo mensaje exista o no el usuario."""

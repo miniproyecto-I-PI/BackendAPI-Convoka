@@ -86,3 +86,27 @@ class AuthTests(APITestCase):
     def test_password_is_hashed(self):
         u = User.objects.get(username="org_a")
         self.assertTrue(u.password.startswith("pbkdf2_"))
+
+    def test_register_creates_user_and_returns_token(self):
+        res = self.client.post("/api/auth/register", {
+            "username": "nuevo",
+            "email": "nuevo@example.com",
+            "password": "Pass1234!",
+        }, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertIn("token", res.data["data"])
+        self.assertTrue(User.objects.filter(username="nuevo").exists())
+
+    def test_register_rejects_duplicate_username(self):
+        User.objects.create_user("dup", password="Pass1234!")
+        res = self.client.post("/api/auth/register", {
+            "username": "dup", "email": "x@x.com", "password": "Pass1234!",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("username", res.data["error"]["details"])
+
+    def test_register_rejects_weak_password(self):
+        res = self.client.post("/api/auth/register", {
+            "username": "nuevo", "email": "n@e.com", "password": "123",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)

@@ -9,6 +9,7 @@ from .views import (
     TodayView,
     DailyLimitView,
     LoginView,    
+    RegisterView,
     LogoutView,    
     MeView,        
 )
@@ -19,6 +20,7 @@ from .views import (
 urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health-check"),
     path("auth/login", LoginView.as_view(), name="auth-login"),    # login
+    path("auth/register", RegisterView.as_view(), name="auth-register"), #Registrar
     path("auth/logout", LogoutView.as_view(), name="auth-logout"), # logout
     path("auth/me", MeView.as_view(), name="auth-me"),             # página login
 
