@@ -55,6 +55,7 @@ class Subtask(models.Model):
 
     name = models.CharField("nombre de la gestión", max_length=200)
     target_date = models.DateField("fecha objetivo")
+    target_time = models.TimeField("hora objetivo", null=True, blank=True) #Nuevo
     estimated_hours = models.DecimalField(
         "horas estimadas",
         max_digits=5,
@@ -63,6 +64,7 @@ class Subtask(models.Model):
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDIENTE)
     note = models.CharField("nota", max_length=500, blank=True)
+    provider = models.CharField("proveedor o encargado", max_length=200, blank=True) #Nuevo
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,10 +1,30 @@
+from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Event, Subtask
+from ..models import Event, Subtask
+
+User = get_user_model()
 
 
-class EventTests(APITestCase):
+class AuthMixin:
+    """Helper: crea un usuario y autentica al test client."""
+
+    def authenticate(self, username="tester", password="Test1234!"):
+        user = User.objects.create_user(username, password=password)
+        token = self.client.post(
+            "/api/auth/login",
+            {"username": username, "password": password},
+            format="json",
+        ).data["data"]["token"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        return user
+
+
+class EventTests(AuthMixin, APITestCase):
+    def setUp(self):
+        self.authenticate()
+
     def _valid_payload(self):
         return {
             "name": "Boda de Juan y María",
@@ -65,7 +85,10 @@ class EventTests(APITestCase):
         self.assertEqual(self.client.get(f"/api/events/{event_id}").data["data"]["progress"], {"done": 0, "total": 0})
 
 
-class EventWithInitialSubtasksTests(APITestCase):
+class EventWithInitialSubtasksTests(AuthMixin, APITestCase):
+    def setUp(self):
+        self.authenticate()
+
     def _payload(self):
         return {
             "name": "Boda con plan logístico",
@@ -80,7 +103,6 @@ class EventWithInitialSubtasksTests(APITestCase):
 
     def test_crea_evento_y_tres_subtareas_asociadas(self):
         response = self.client.post("/api/events", self._payload(), format="json")
-
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data["success"])
         event = Event.objects.get()
@@ -96,17 +118,16 @@ class EventWithInitialSubtasksTests(APITestCase):
     def test_subtarea_invalida_no_deja_evento_parcial(self):
         payload = self._payload()
         payload["subtasks"][1]["estimated_hours"] = 0
-
         response = self.client.post("/api/events", payload, format="json")
-
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data["success"])
         self.assertEqual(Event.objects.count(), 0)
         self.assertEqual(Subtask.objects.count(), 0)
 
 
-class SubtaskTests(APITestCase):
+class SubtaskTests(AuthMixin, APITestCase):
     def setUp(self):
+        self.authenticate()
         response = self.client.post(
             "/api/events",
             {
@@ -136,7 +157,7 @@ class SubtaskTests(APITestCase):
         self.assertEqual(Subtask.objects.count(), 0)
 
     def test_estimated_hours_mayor_a_cero(self):
-        """Test explícitamente exigido por el backlog (US-02)."""
+        """Test exigido por US-02."""
         payload = self._valid_payload()
         payload["estimated_hours"] = 0
         response = self.client.post(f"/api/events/{self.event_id}/subtasks", payload, format="json")
@@ -163,8 +184,9 @@ class SubtaskTests(APITestCase):
         self.assertEqual(subtask.event_id, self.event_id)
 
 
-class EditDeleteTests(APITestCase):
+class EditDeleteTests(AuthMixin, APITestCase):
     def setUp(self):
+        self.authenticate()
         response = self.client.post(
             "/api/events",
             {
@@ -208,7 +230,10 @@ class EditDeleteTests(APITestCase):
         self.assertEqual(Subtask.objects.count(), 0)
 
 
-class ConnectedEndpointsTests(APITestCase):
+class ConnectedEndpointsTests(AuthMixin, APITestCase):
+    def setUp(self):
+        self.authenticate()
+
     def test_today_devuelve_gestiones_pendientes_con_datos_del_evento(self):
         response = self.client.post("/api/events", {
             "name": "Evento de prueba", "type": "SOCIAL", "event_datetime": "2026-12-05T18:00:00Z",

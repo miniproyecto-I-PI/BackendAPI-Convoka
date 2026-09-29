@@ -8,6 +8,10 @@ from .views import (
     SubtaskListCreateView,
     TodayView,
     DailyLimitView,
+    LoginView,    
+    RegisterView,
+    LogoutView,    
+    MeView,        
 )
 
 # Nota: sin "/" final a propósito, para calzar con el contrato del backlog
@@ -15,6 +19,11 @@ from .views import (
 # a `${API_URL}/events` sin slash final.
 urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health-check"),
+    path("auth/login", LoginView.as_view(), name="auth-login"),    # login
+    path("auth/register", RegisterView.as_view(), name="auth-register"), #Registrar
+    path("auth/logout", LogoutView.as_view(), name="auth-logout"), # logout
+    path("auth/me", MeView.as_view(), name="auth-me"),             # página login
+
     path("events", EventListCreateView.as_view(), name="event-list-create"),
     path("today", TodayView.as_view(), name="today"),
     path("settings/daily-limit", DailyLimitView.as_view(), name="daily-limit"),
