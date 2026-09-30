@@ -21,7 +21,10 @@ from .utils import error_response, success_response, validation_details
 User = get_user_model()
 
 class RegisterView(APIView):
-    """Registro de organizador nuevo (auto-login tras crear la cuenta)."""
+    """
+    Registro de organizador nuevo.
+    NO auto-loguea: el usuario debe ir a /login para iniciar sesión.
+    """
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -36,10 +39,9 @@ class RegisterView(APIView):
                 status.HTTP_400_BAD_REQUEST,
             )
         user = serializer.save()
-        token, _ = Token.objects.get_or_create(user=user)
         return success_response(
-            {"token": token.key, "user": UserSerializer(user).data},
-            "Cuenta creada correctamente.",
+            {"user": UserSerializer(user).data},
+            "Cuenta creada correctamente. Ahora puedes iniciar sesión.",
             status.HTTP_201_CREATED,
         )
 
