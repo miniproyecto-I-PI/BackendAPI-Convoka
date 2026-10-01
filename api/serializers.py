@@ -6,6 +6,7 @@ from .models import Event, Subtask
 User = get_user_model()
 
 class RegisterSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(required=True, allow_blank=False)
     password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
@@ -18,8 +19,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_email(self, value):
-        if not value:
-            return value
+        # Ya es required y allow_blank=False, así que aquí value nunca llega vacío.
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("Ese correo ya está registrado.")
         return value
