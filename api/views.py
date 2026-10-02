@@ -269,8 +269,8 @@ class TodayView(APIView):
             "- `proximas`: `target_date` posterior a hoy, hasta 7 días en el futuro.\n\n"
             "**Regla de orden dentro de cada grupo:** `target_date` ascendente; en caso de empate, "
             "`estimated_hours` ascendente (menor esfuerzo primero).\n\n"
-            "**Gestiones excluidas:** todas las que tienen `status = EJECUTADA`. "
-            "Solo se devuelven las `PENDIENTE` y `POSPUESTA`.\n\n"
+            "**Por defecto: se excluyen las gestiones con status = EJECUTADA (regla de US-04).\n\n"
+            "Si se envía el filtro status=EJECUTADA, el endpoint devuelve el histórico de gestiones ejecutadas..\n\n"
             "**Filtros opcionales (US-05):** se pueden combinar entre sí con `&`."
         ),
         parameters=[
@@ -324,17 +324,22 @@ class TodayView(APIView):
         today = timezone.localdate()
         qs = Subtask.objects.filter(
             event__user=request.user,
-        ).exclude(
-            status=Subtask.Status.EJECUTADA,   # US-04: excluir ejecutadas
         ).select_related("event")
 
-        # US-05 — filtros opcionales
         event_id = request.query_params.get("event_id")
         status_param = request.query_params.get("status")
+
         if event_id:
             qs = qs.filter(event_id=event_id)
+
         if status_param:
+            # El usuario pidió un estado explícito → respétalo tal cual.
+            # Esto habilita ?status=EJECUTADA.
             qs = qs.filter(status=status_param)
+        else:
+            # Sin filtro de estado: /hoy muestra solo trabajo pendiente.
+            # Excluye ejecutadas por la regla de US-04 ("no ejecutadas").
+            qs = qs.exclude(status=Subtask.Status.EJECUTADA)
 
         qs = qs.filter(
             target_date__lte=today + timedelta(days=self.UPCOMING_DAYS)
