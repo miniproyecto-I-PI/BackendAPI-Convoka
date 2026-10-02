@@ -67,6 +67,21 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Documentación de la API de Convoka",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SECURITY": [{"TokenAuth": []}],
+    "COMPONENTS": {
+        "securitySchemes": {
+            "TokenAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "Authorization",
+                "description": (
+                    "Token DRF. Formato del header: "
+                    "`Authorization: Token <key>`. "
+                    "Obtenlo con POST /api/auth/login."
+                ),
+            }
+        }
+    },
 }
 
 ROOT_URLCONF = "config.urls"
