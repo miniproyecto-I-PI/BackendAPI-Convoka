@@ -1,5 +1,6 @@
 from django.db import connection, transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 from decimal import Decimal, InvalidOperation
 from drf_spectacular.utils import (
     extend_schema,
@@ -422,11 +423,22 @@ class SubtaskListCreateView(APIView):
         summary="Crear subtarea logística",
         request=SubtaskSerializer,
         responses={201: SubtaskSerializer},
-    )
+)
     def post(self, request, event_id):
         event = Event.objects.filter(pk=event_id, user=request.user).first()
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
+
+        # No permitir crear gestiones en eventos que ya finalizaron.
+        from django.utils import timezone
+        if event.event_datetime < timezone.now():
+            return error_response(
+                "event_already_finished",
+                "No se pueden agregar gestiones a un evento que ya finalizó.",
+                {"event_id": ["El evento ya pasó."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
         serializer = SubtaskSerializer(data=request.data)
         if not serializer.is_valid():
             return error_response(
