@@ -429,16 +429,6 @@ class SubtaskListCreateView(APIView):
         if event is None:
             return error_response("not_found", "Evento no encontrado.", status_code=404)
 
-        # No permitir crear gestiones en eventos que ya finalizaron.
-        from django.utils import timezone
-        if event.event_datetime < timezone.now():
-            return error_response(
-                "event_already_finished",
-                "No se pueden agregar gestiones a un evento que ya finalizó.",
-                {"event_id": ["El evento ya pasó."]},
-                status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = SubtaskSerializer(data=request.data)
         if not serializer.is_valid():
             return error_response(
@@ -447,6 +437,18 @@ class SubtaskListCreateView(APIView):
                 validation_details(serializer.errors),
                 status.HTTP_400_BAD_REQUEST,
             )
+
+        # La fecha objetivo no puede ser posterior a la fecha del evento.
+        target_date = serializer.validated_data["target_date"]
+        event_date = event.event_datetime.date()
+        if target_date > event_date:
+            return error_response(
+                "target_date_after_event",
+                "La fecha objetivo no puede ser posterior a la fecha del evento.",
+                {"target_date": [f"Debe ser igual o anterior al {event_date.isoformat()}."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
         # status siempre arranca en PENDIENTE, sin importar lo que llegue en el body
         subtask = serializer.save(event=event, status=Subtask.Status.PENDIENTE)
         return success_response(
