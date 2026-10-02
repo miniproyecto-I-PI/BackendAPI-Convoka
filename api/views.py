@@ -259,64 +259,74 @@ class TodayView(APIView):
     UPCOMING_DAYS = 7  # Decisión UX para "Próximas"
 
     @extend_schema(
-        summary="Listar gestiones para Hoy (US-04 + US-05)",
-        description=(
-            "Devuelve las gestiones logísticas **no ejecutadas** del organizador autenticado, "
-            "agrupadas y ordenadas según la regla de prioridad de US-04.\n\n"
-            "**Agrupación (campo `group` en la respuesta):**\n"
-            "- `vencidas`: `target_date` anterior a hoy. Ordenadas de la más antigua a la más reciente.\n"
-            "- `hoy`: `target_date` igual a hoy.\n"
-            "- `proximas`: `target_date` posterior a hoy, hasta 7 días en el futuro.\n\n"
-            "**Regla de orden dentro de cada grupo:** `target_date` ascendente; en caso de empate, "
-            "`estimated_hours` ascendente (menor esfuerzo primero).\n\n"
-            "**Por defecto: se excluyen las gestiones con status = EJECUTADA (regla de US-04).\n\n"
-            "Si se envía el filtro status=EJECUTADA, el endpoint devuelve el histórico de gestiones ejecutadas..\n\n"
-            "**Filtros opcionales (US-05):** se pueden combinar entre sí con `&`."
+    summary="Listar gestiones para Hoy (US-04 + US-05)",
+    description=(
+        "Devuelve las gestiones logísticas del organizador autenticado.\n\n"
+        "**Por defecto** se devuelven solo gestiones **no ejecutadas**, "
+        "agrupadas y ordenadas según la regla de prioridad de US-04.\n\n"
+        "**Agrupación (campo `group`):**\n"
+        "- `vencidas`: `target_date` anterior a hoy (más antigua primero).\n"
+        "- `hoy`: `target_date` igual a hoy.\n"
+        "- `proximas`: `target_date` posterior a hoy, hasta 7 días.\n"
+        "- `ejecutadas`: solo aparece cuando se filtra explícitamente con "
+        "`?status=EJECUTADA`. Devuelve el histórico completo de gestiones "
+        "completadas, sin límite de fecha.\n\n"
+        "**Orden dentro de cada grupo:** `target_date` ascendente; en caso de empate, "
+        "`estimated_hours` ascendente (menor esfuerzo primero).\n\n"
+        "**Filtros opcionales (US-05):** combinables con `&`."
+    ),
+    parameters=[
+        OpenApiParameter(
+            name="event_id",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description="Filtra por id de evento. Solo eventos del usuario autenticado.",
         ),
-        parameters=[
-            OpenApiParameter(
-                name="event_id",
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.QUERY,
-                required=False,
-                description="Filtra las gestiones por id de evento. Solo se devuelven gestiones de eventos del usuario autenticado.",
+        OpenApiParameter(
+            name="status",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            enum=["PENDIENTE", "POSPUESTA", "EJECUTADA"],
+            description=(
+                "Filtra por estado. `EJECUTADA` habilita el grupo `ejecutadas` "
+                "con el histórico completo. Sin este parámetro, se excluyen "
+                "las ejecutadas (regla de US-04)."
             ),
-            OpenApiParameter(
-                name="status",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                required=False,
-                enum=["PENDIENTE", "POSPUESTA"],
-                description=(
-                    "Filtra por estado de la gestión. `EJECUTADA` no se admite: "
-                    "las gestiones ejecutadas se excluyen siempre, así que devolvería una lista vacía."
-                ),
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=inline_serializer(
+                name="TodayItem",
+                fields={
+                    "id": serializers.IntegerField(),
+                    "name": serializers.CharField(),
+                    "target_date": serializers.DateField(),
+                    "time": serializers.TimeField(allow_null=True),
+                    "estimated_hours": serializers.DecimalField(max_digits=5, decimal_places=2),
+                    "status": serializers.ChoiceField(
+                        choices=["PENDIENTE", "POSPUESTA", "EJECUTADA"]
+                    ),
+                    "note": serializers.CharField(),
+                    "provider": serializers.CharField(),
+                    "event_name": serializers.CharField(),
+                    "event_type": serializers.CharField(),
+                    "group": serializers.ChoiceField(
+                        choices=["vencidas", "hoy", "proximas", "ejecutadas"]
+                    ),
+                },
+                many=True,
             ),
-        ],
-        responses={
-            200: OpenApiResponse(
-                response=inline_serializer(
-                    name="TodayItem",
-                    fields={
-                        "id": serializers.IntegerField(),
-                        "name": serializers.CharField(),
-                        "target_date": serializers.DateField(),
-                        "time": serializers.TimeField(allow_null=True),
-                        "estimated_hours": serializers.DecimalField(max_digits=5, decimal_places=2),
-                        "status": serializers.ChoiceField(choices=["PENDIENTE", "POSPUESTA"]),
-                        "note": serializers.CharField(),
-                        "provider": serializers.CharField(),
-                        "event_name": serializers.CharField(),
-                        "event_type": serializers.CharField(),
-                        "group": serializers.ChoiceField(choices=["vencidas", "hoy", "proximas"]),
-                    },
-                    many=True,
-                ),
-                description="Lista de gestiones no ejecutadas del usuario, con agrupación y orden listos para la vista 'Hoy'.",
+            description=(
+                "Lista de gestiones del usuario. Cada item incluye `group` "
+                "para que el cliente pueda separar en las cuatro secciones."
             ),
-            401: OpenApiResponse(description="Token ausente, inválido o expirado."),
-        },
-    )
+        ),
+        401: OpenApiResponse(description="Token ausente, inválido o expirado."),
+    },
+)
     def get(self, request):
         from datetime import timedelta
         from django.utils import timezone
@@ -333,17 +343,17 @@ class TodayView(APIView):
             qs = qs.filter(event_id=event_id)
 
         if status_param:
-            # El usuario pidió un estado explícito → respétalo tal cual.
-            # Esto habilita ?status=EJECUTADA.
+            # Estado explícito → respétalo tal cual (habilita EJECUTADA).
             qs = qs.filter(status=status_param)
         else:
-            # Sin filtro de estado: /hoy muestra solo trabajo pendiente.
-            # Excluye ejecutadas por la regla de US-04 ("no ejecutadas").
+            # Sin filtro: /hoy muestra solo trabajo pendiente (US-04).
             qs = qs.exclude(status=Subtask.Status.EJECUTADA)
 
-        qs = qs.filter(
-            target_date__lte=today + timedelta(days=self.UPCOMING_DAYS)
-        ).order_by("target_date", "estimated_hours", "id")
+        # El límite de 7 días no aplica al histórico de ejecutadas.
+        if status_param != Subtask.Status.EJECUTADA:
+            qs = qs.filter(target_date__lte=today + timedelta(days=self.UPCOMING_DAYS))
+
+        qs = qs.order_by("target_date", "estimated_hours", "id")
 
         data = []
         for task in qs:
@@ -351,9 +361,11 @@ class TodayView(APIView):
             item["event_name"] = task.event.name
             item["event_type"] = task.event.type
 
-            # US-04 — el grupo viaja también desde el BE (FE puede ignorarlo
-            # si sigue agrupando con sortGestiones.js)
-            if task.target_date < today:
+            # Grupo: las ejecutadas van a un bloque propio, no se mezclan
+            # con la clasificación temporal de US-04.
+            if task.status == Subtask.Status.EJECUTADA:
+                item["group"] = "ejecutadas"
+            elif task.target_date < today:
                 item["group"] = "vencidas"
             elif task.target_date == today:
                 item["group"] = "hoy"
