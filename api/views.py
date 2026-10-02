@@ -1,7 +1,13 @@
 from django.db import connection, transaction
 from django.db.models import Count, Q
 from decimal import Decimal, InvalidOperation
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import (
+    extend_schema,
+    inline_serializer,
+    OpenApiParameter,
+    OpenApiResponse,
+)
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -252,7 +258,65 @@ class EventDetailView(APIView):
 class TodayView(APIView):
     UPCOMING_DAYS = 7  # Decisión UX para "Próximas"
 
-    @extend_schema(summary="Listar gestiones para Hoy")
+    @extend_schema(
+        summary="Listar gestiones para Hoy (US-04 + US-05)",
+        description=(
+            "Devuelve las gestiones logísticas **no ejecutadas** del organizador autenticado, "
+            "agrupadas y ordenadas según la regla de prioridad de US-04.\n\n"
+            "**Agrupación (campo `group` en la respuesta):**\n"
+            "- `vencidas`: `target_date` anterior a hoy. Ordenadas de la más antigua a la más reciente.\n"
+            "- `hoy`: `target_date` igual a hoy.\n"
+            "- `proximas`: `target_date` posterior a hoy, hasta 7 días en el futuro.\n\n"
+            "**Regla de orden dentro de cada grupo:** `target_date` ascendente; en caso de empate, "
+            "`estimated_hours` ascendente (menor esfuerzo primero).\n\n"
+            "**Gestiones excluidas:** todas las que tienen `status = EJECUTADA`. "
+            "Solo se devuelven las `PENDIENTE` y `POSPUESTA`.\n\n"
+            "**Filtros opcionales (US-05):** se pueden combinar entre sí con `&`."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="event_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filtra las gestiones por id de evento. Solo se devuelven gestiones de eventos del usuario autenticado.",
+            ),
+            OpenApiParameter(
+                name="status",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["PENDIENTE", "POSPUESTA"],
+                description=(
+                    "Filtra por estado de la gestión. `EJECUTADA` no se admite: "
+                    "las gestiones ejecutadas se excluyen siempre, así que devolvería una lista vacía."
+                ),
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="TodayItem",
+                    fields={
+                        "id": serializers.IntegerField(),
+                        "name": serializers.CharField(),
+                        "target_date": serializers.DateField(),
+                        "time": serializers.TimeField(allow_null=True),
+                        "estimated_hours": serializers.DecimalField(max_digits=5, decimal_places=2),
+                        "status": serializers.ChoiceField(choices=["PENDIENTE", "POSPUESTA"]),
+                        "note": serializers.CharField(),
+                        "provider": serializers.CharField(),
+                        "event_name": serializers.CharField(),
+                        "event_type": serializers.CharField(),
+                        "group": serializers.ChoiceField(choices=["vencidas", "hoy", "proximas"]),
+                    },
+                    many=True,
+                ),
+                description="Lista de gestiones no ejecutadas del usuario, con agrupación y orden listos para la vista 'Hoy'.",
+            ),
+            401: OpenApiResponse(description="Token ausente, inválido o expirado."),
+        },
+    )
     def get(self, request):
         from datetime import timedelta
         from django.utils import timezone
