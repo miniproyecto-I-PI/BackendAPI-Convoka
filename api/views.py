@@ -257,7 +257,7 @@ class HealthCheckView(APIView):
 
 class EventListCreateView(APIView):
     """
-    GET  /api/events   Lista los eventos del usuario demo.
+    GET  /api/events   Lista los eventos del usuario.
     POST /api/events   Crea un evento (US-01).
     """
 
