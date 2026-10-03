@@ -17,6 +17,7 @@ from .views import (
 # Nota: sin "/" final a propósito, para calzar con el contrato del backlog
 # ("POST /events", no "POST /events/") y con services/api.js, que ya llama
 # a `${API_URL}/events` sin slash final.
+#Empiezan en /api/...
 urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health-check"),
     path("auth/login", LoginView.as_view(), name="auth-login"),    # login
