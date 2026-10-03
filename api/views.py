@@ -48,13 +48,13 @@ class RegisterView(APIView):
             "- `username` y `email` son únicos; si ya existen → `400`.\n"
             "- `email` es obligatorio.\n"
             "- La contraseña se guarda hasheada con `create_user` (pbkdf2).\n"
-            "- La contraseña debe tener al menos 8 caracteres."
+            "- La contraseña debe tener al menos 8 caracteres.\n\n"
+            "**Usado por el FE:** pantalla de registro. Tras un `201`, la app "
+            "redirige a `/login` para que el usuario inicie sesión."
         ),
         request=RegisterSerializer,
         responses={
-            201: OpenApiResponse(
-                description="Cuenta creada. La respuesta incluye el usuario pero **no** un token.",
-            ),
+            201: OpenApiResponse(description="Cuenta creada. La respuesta incluye el usuario pero **no** un token."),
             400: OpenApiResponse(description="Validación fallida (username/email duplicado, email vacío, contraseña corta)."),
         },
         tags=["Autenticación"],
@@ -90,13 +90,13 @@ class LoginView(APIView):
             "**Seguridad:** el mensaje de error es siempre `'Credenciales inválidas'`, "
             "exista o no el usuario. Así no se filtra información sensible.\n\n"
             "**Uso del token en requests posteriores:**\n"
-            "```\nAuthorization: Token <key>\n```"
+            "```\nAuthorization: Token <key>\n```\n\n"
+            "**Usado por el FE:** formulario de `/login`. Tras un `200`, el FE "
+            "guarda el token en `localStorage` (o `sessionStorage`) y navega a `/hoy`."
         ),
         request=LoginSerializer,
         responses={
-            200: OpenApiResponse(
-                description="Login exitoso. Devuelve `{ token, user }`.",
-            ),
+            200: OpenApiResponse(description="Login exitoso. Devuelve `{ token, user }`."),
             400: OpenApiResponse(description="Faltan campos obligatorios (`username`/`email` y `password`)."),
             401: OpenApiResponse(description="Credenciales inválidas."),
         },
@@ -146,7 +146,9 @@ class LogoutView(APIView):
             "de la base de datos. Cualquier intento posterior de usar ese token "
             "responderá `401 Invalid token`.\n\n"
             "El cliente debe además limpiar su almacenamiento local "
-            "(`localStorage` / `sessionStorage`)."
+            "(`localStorage` / `sessionStorage`).\n\n"
+            "**Usado por el FE:** botón Cerrar sesión en el header. El FE "
+            "limpia el token de storage y redirige a `/login`."
         ),
         responses={
             200: OpenApiResponse(description="Sesión cerrada. Token eliminado."),
@@ -166,7 +168,9 @@ class MeView(APIView):
         description=(
             "Devuelve los datos del usuario identificado por el token. "
             "Se usa al recargar la SPA para restaurar la sesión sin pedir login de nuevo.\n\n"
-            "Si responde `401`, el frontend debe limpiar el token y redirigir a `/login`."
+            "Si responde `401`, el frontend debe limpiar el token y redirigir a `/login`.\n\n"
+            "**Usado por el FE:** al montar el `AuthProvider`, el FE llama a este "
+            "endpoint para restaurar la sesión desde el token guardado."
         ),
         responses={
             200: OpenApiResponse(
@@ -211,7 +215,9 @@ class HealthCheckView(APIView):
             "Verifica que el servicio de Django y la base de datos estén activos "
             "ejecutando un `SELECT 1` contra la BD.\n\n"
             "**No requiere autenticación.** Útil para UptimeRobot o para que Render "
-            "no apague la instancia por inactividad."
+            "no apague la instancia por inactividad.\n\n"
+            "**Usado por el FE:** no directamente. Se usa para monitoreo externo "
+            "(UptimeRobot) o para el botón Comprobar estado del servicio del FE."
         ),
         responses={
             200: inline_serializer(
@@ -261,7 +267,9 @@ class EventListCreateView(APIView):
             "Devuelve todos los eventos del usuario autenticado, ordenados por "
             "`event_datetime` descendente (los más próximos primero).\n\n"
             "Cada evento incluye sus `subtasks` anidadas y un objeto `progress` "
-            "con `{done, total}` ya calculado por Django en una sola query."
+            "con `{done, total}` ya calculado por Django en una sola query.\n\n"
+            "**Usado por el FE:** vista `/eventos` (listado completo) y dashboard "
+            "principal. El FE lo llama una sola vez al montar el hook `useEvents`."
         ),
         responses={
             200: OpenApiResponse(
@@ -286,7 +294,9 @@ class EventListCreateView(APIView):
             "- Si se envían `subtasks`, cada una debe tener `target_date` **≤** "
             "`event_datetime.date()`. Si alguna es posterior → `400`.\n"
             "- Todo corre en una transacción atómica: si falla una subtask, no se crea nada.\n"
-            "- El evento queda asociado al usuario del token."
+            "- El evento queda asociado al usuario del token.\n\n"
+            "**Usado por el FE:** vista `/crear`. Tras un `201`, el FE navega al "
+            "detalle del evento o a `/hoy` con un toast de confirmación."
         ),
         request=EventSerializer,
         responses={
@@ -348,7 +358,9 @@ class EventDetailView(APIView):
         description=(
             "Devuelve un evento del usuario autenticado, con sus subtasks y progress.\n\n"
             "Si el evento no existe **o pertenece a otro usuario** → `404` "
-            "(no se revela la existencia de eventos ajenos)."
+            "(no se revela la existencia de eventos ajenos).\n\n"
+            "**Usado por el FE:** vista `/evento/:id`. El hook `useEventSubtasks` "
+            "lo llama al montar y también tras cada edición del evento."
         ),
         responses={
             200: OpenApiResponse(response=EventSerializer, description="Evento con subtasks y progress."),
@@ -369,7 +381,9 @@ class EventDetailView(APIView):
             "Actualiza **parcialmente** un evento. Solo se modifican los campos "
             "que se envíen en el body.\n\n"
             "Si envías `event_datetime`, ten en cuenta que puedes dejar gestiones "
-            "con `target_date` posterior. No se valida ese cruce al editar el evento."
+            "con `target_date` posterior. No se valida ese cruce al editar el evento.\n\n"
+            "**Usado por el FE:** modal Editar ficha de evento en `/evento/:id`. "
+            "Tras un `200`, el FE muestra el modal de éxito y refresca la vista."
         ),
         request=EventSerializer,
         responses={
@@ -399,7 +413,9 @@ class EventDetailView(APIView):
         description=(
             "Elimina un evento y **todas sus gestiones** (CASCADE). "
             "La operación es permanente; no hay soft-delete.\n\n"
-            "El frontend debe pedir confirmación al usuario antes de llamar este endpoint."
+            "El frontend debe pedir confirmación al usuario antes de llamar este endpoint.\n\n"
+            "**Usado por el FE:** modal `DeleteEventModal`. Tras confirmar, el FE "
+            "redirige a `/hoy` con un toast de Evento eliminado."
         ),
         responses={
             200: OpenApiResponse(description="Evento y sus gestiones eliminados."),
@@ -437,7 +453,9 @@ class TodayView(APIView):
             "completadas, sin límite de fecha.\n\n"
             "**Orden dentro de cada grupo:** `target_date` ascendente; en caso de empate, "
             "`estimated_hours` ascendente (menor esfuerzo primero).\n\n"
-            "**Filtros opcionales (US-05):** combinables con `&`."
+            "**Filtros opcionales (US-05):** combinables con `&`.\n\n"
+            "**Usado por el FE:** vista `/hoy`. El hook `useTodayGestiones` lo llama "
+            "al montar y cada vez que cambian los filtros de estado o evento."
         ),
         parameters=[
             OpenApiParameter(
@@ -558,7 +576,9 @@ class DailyLimitView(APIView):
             "Devuelve el límite diario de horas de gestión configurado por el usuario "
             "(por defecto **6** si no lo ha modificado).\n\n"
             "Este valor se usa en **US-07** para detectar sobrecarga cuando se "
-            "reprograman gestiones."
+            "reprograman gestiones.\n\n"
+            "**Usado por el FE:** pantalla de configuración. El FE lo llama al "
+            "montar la vista para mostrar el valor actual."
         ),
         responses={
             200: OpenApiResponse(description="Valor actual del límite diario."),
@@ -574,7 +594,9 @@ class DailyLimitView(APIView):
         description=(
             "Actualiza el límite diario de horas de gestión del usuario.\n\n"
             "**Rango válido:** entre 1 y 16 horas, con un decimal como máximo.\n"
-            "Valores fuera de rango → `400`."
+            "Valores fuera de rango → `400`.\n\n"
+            "**Usado por el FE:** input numérico en la pantalla de configuración. "
+            "Se llama al guardar y muestra un toast de confirmación."
         ),
         request=inline_serializer(
             name="DailyLimitRequest",
@@ -614,7 +636,11 @@ class SubtaskListCreateView(APIView):
         summary="Listar gestiones de un evento",
         description=(
             "Devuelve todas las gestiones (`Subtask`) asociadas a un evento del usuario.\n\n"
-            "Si el evento no existe **o pertenece a otro usuario** → `404`."
+            "Si el evento no existe **o pertenece a otro usuario** → `404`.\n\n"
+            "**Usado por el FE:** el hook `useEventSubtasks` lo llama al abrir "
+            "`/evento/:id`. Sin embargo, el detalle del evento (`GET /events/:id`) "
+            "ya trae las subtasks anidadas, así que este endpoint suele usarse solo "
+            "para refrescos puntuales."
         ),
         responses={
             200: OpenApiResponse(
@@ -643,7 +669,9 @@ class SubtaskListCreateView(APIView):
             "- `estimated_hours` debe ser mayor a 0.\n"
             "- `target_date` **no puede ser posterior** a la fecha del evento. "
             "Si lo es → `400 target_date_after_event`.\n"
-            "- El `status` siempre arranca en `PENDIENTE`, ignorando lo que llegue en el body."
+            "- El `status` siempre arranca en `PENDIENTE`, ignorando lo que llegue en el body.\n\n"
+            "**Usado por el FE:** vista `/evento/:id/gestiones/crear`. Tras un `201`, "
+            "el FE muestra el modal `CreateSubtaskSuccessModal` y refresca el detalle."
         ),
         request=SubtaskSerializer,
         responses={
@@ -703,7 +731,9 @@ class SubtaskDetailView(APIView):
             "- Marcar como ejecutada: `{ \"status\": \"EJECUTADA\" }` (US-09).\n"
             "- Posponer con nota: `{ \"status\": \"POSPUESTA\", \"note\": \"...\" }` (US-09).\n"
             "- Reprogramar: `{ \"target_date\": \"YYYY-MM-DD\" }` (US-06).\n"
-            "- Cambiar horas: `{ \"estimated_hours\": 2.5 }`."
+            "- Cambiar horas: `{ \"estimated_hours\": 2.5 }`.\n\n"
+            "**Usado por el FE:** botones Hecha, Posponer y Reprogramar en "
+            "`/hoy` y `/evento/:id`; también el modal `EditSubtaskModal`."
         ),
         request=SubtaskSerializer,
         responses={
@@ -732,7 +762,9 @@ class SubtaskDetailView(APIView):
         summary="Eliminar gestión (US-03)",
         description=(
             "Elimina una gestión. La operación es permanente; no hay soft-delete.\n\n"
-            "El frontend debe pedir confirmación antes de llamar este endpoint."
+            "El frontend debe pedir confirmación antes de llamar este endpoint.\n\n"
+            "**Usado por el FE:** modal `DeleteSubtaskModal` en `/evento/:id`. "
+            "Tras confirmar, el FE muestra un toast de Gestión eliminada."
         ),
         responses={
             200: OpenApiResponse(description="Gestión eliminada."),
