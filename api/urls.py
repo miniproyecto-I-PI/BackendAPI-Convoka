@@ -12,6 +12,9 @@ from .views import (
     RegisterView,
     LogoutView,    
     MeView,        
+    OverloadCheckView,
+    OverloadSuggestionsView,
+    UserSettingsView,
 )
 
 # Nota: sin "/" final a propósito, para calzar con el contrato del backlog
@@ -27,7 +30,10 @@ urlpatterns = [
 
     path("events", EventListCreateView.as_view(), name="event-list-create"),
     path("today", TodayView.as_view(), name="today"),
+    path("settings", UserSettingsView.as_view(), name="user-settings"),
     path("settings/daily-limit", DailyLimitView.as_view(), name="daily-limit"),
+    path("conflicts/overload", OverloadCheckView.as_view(), name="conflicts-overload"),
+    path("conflicts/suggestions", OverloadSuggestionsView.as_view(), name="conflicts-suggestions"),
     path("events/<int:pk>", EventDetailView.as_view(), name="event-detail"),
     path(
         "events/<int:event_id>/subtasks",

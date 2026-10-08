@@ -1,9 +1,44 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
-from .models import Event, Subtask
+from decimal import Decimal
+
+from .models import Event, Subtask, UserSettings
 
 User = get_user_model()
+
+DAILY_LIMIT_MESSAGE = "El límite debe estar entre 1 y 16 horas."
+
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    """Preferencias del usuario: límite diario (US-12) y permitir sobrecarga."""
+
+    daily_limit_hours = serializers.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        coerce_to_string=False,
+        required=False,
+        error_messages={
+            "invalid": DAILY_LIMIT_MESSAGE,
+            "null": DAILY_LIMIT_MESSAGE,
+            "max_digits": DAILY_LIMIT_MESSAGE,
+            "max_decimal_places": "Usa como máximo un decimal (ej. 4.5).",
+            "max_whole_digits": DAILY_LIMIT_MESSAGE,
+        },
+    )
+    allow_overload = serializers.BooleanField(
+        required=False,
+        error_messages={"invalid": "Debe ser true o false."},
+    )
+
+    class Meta:
+        model = UserSettings
+        fields = ["daily_limit_hours", "allow_overload"]
+
+    def validate_daily_limit_hours(self, value):
+        if not Decimal("1") <= value <= Decimal("16"):
+            raise serializers.ValidationError(DAILY_LIMIT_MESSAGE)
+        return value
 
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=True, allow_blank=False)
@@ -51,8 +86,21 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "email"]
 
 
+INVALID_DATE_MESSAGE = "Ingresa una fecha válida."
+
+
 class SubtaskSerializer(serializers.ModelSerializer):
     event = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # US-06: fecha obligatoria y con formato YYYY-MM-DD; mismo mensaje en todos los casos.
+    target_date = serializers.DateField(
+        error_messages={
+            "required": INVALID_DATE_MESSAGE,
+            "null": INVALID_DATE_MESSAGE,
+            "invalid": INVALID_DATE_MESSAGE,
+            "datetime": INVALID_DATE_MESSAGE,
+        },
+    )
 
     time = serializers.TimeField(
         source="target_time",

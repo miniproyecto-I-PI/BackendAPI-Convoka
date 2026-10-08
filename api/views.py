@@ -1,6 +1,7 @@
 from django.db import connection, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from drf_spectacular.utils import (
     extend_schema,
@@ -20,8 +21,16 @@ from .serializers import LoginSerializer, UserSerializer
 from .serializers import RegisterSerializer
 
 from .demo import get_demo_user
-from .models import Event, Subtask, UserSettings
-from .serializers import EventSerializer, SubtaskSerializer
+from .models import Event, Subtask
+from .overload import (
+    check_day,
+    day_load,
+    evaluate_new_subtasks,
+    evaluate_subtask_change,
+    get_user_settings,
+    suggest_days,
+)
+from .serializers import EventSerializer, SubtaskSerializer, UserSettingsSerializer
 from .utils import error_response, success_response, validation_details
 
 User = get_user_model()
@@ -197,6 +206,52 @@ def events_with_progress(queryset):
     ).prefetch_related("subtasks")
 
 
+def overload_conflict_response(conflicts):
+    """409 de US-07: el cambio supera el límite diario y el usuario no permite sobrecarga."""
+    details = {"conflicts": conflicts}
+    if len(conflicts) == 1:
+        details["conflict"] = conflicts[0]
+    return error_response(
+        "overload_conflict",
+        conflicts[0]["message"],
+        details,
+        status.HTTP_409_CONFLICT,
+    )
+
+
+def target_date_after_event_response(event_date):
+    return error_response(
+        "target_date_after_event",
+        "La fecha objetivo no puede ser posterior a la fecha del evento.",
+        {"target_date": [f"Debe ser igual o anterior al {event_date.isoformat()}."]},
+        status.HTTP_400_BAD_REQUEST,
+    )
+
+
+CONFLICT_REPORT_SCHEMA = inline_serializer(
+    name="OverloadReport",
+    fields={
+        "date": serializers.DateField(),
+        "current_hours": serializers.FloatField(help_text="Horas ya planificadas ese día (sin esta gestión)."),
+        "added_hours": serializers.FloatField(help_text="Horas que aporta la gestión evaluada."),
+        "planned_hours": serializers.FloatField(help_text="Total resultante del día."),
+        "limit_hours": serializers.FloatField(help_text="Límite diario del usuario (US-12)."),
+        "exceeds_by": serializers.FloatField(help_text="Horas por encima del límite (0 si no excede)."),
+        "has_conflict": serializers.BooleanField(),
+        "allow_overload": serializers.BooleanField(help_text="Preferencia del usuario."),
+        "message": serializers.CharField(help_text="Texto listo para mostrar; vacío si no hay conflicto."),
+    },
+)
+
+CONFLICT_409_DESCRIPTION = (
+    "Conflicto de sobrecarga diaria (`code: overload_conflict`). Solo ocurre si el "
+    "usuario tiene `allow_overload=false`. No se guarda nada. `error.message` trae el "
+    "texto listo (\"Quedarías con 7h de gestión planificadas (límite 6h)\") y "
+    "`error.details.conflict` / `error.details.conflicts` el reporte con "
+    "`planned_hours`, `limit_hours`, `exceeds_by`, `has_conflict`."
+)
+
+
 # -----------------------------------------------------------------------------
 # Health
 # -----------------------------------------------------------------------------
@@ -294,7 +349,12 @@ class EventListCreateView(APIView):
             "- Si se envían `subtasks`, cada una debe tener `target_date` **≤** "
             "`event_datetime.date()`. Si alguna es posterior → `400`.\n"
             "- Todo corre en una transacción atómica: si falla una subtask, no se crea nada.\n"
-            "- El evento queda asociado al usuario del token.\n\n"
+            "- El evento queda asociado al usuario del token.\n"
+            "- **Sobrecarga diaria (US-07):** las gestiones iniciales se suman (por día) a "
+            "las que el usuario ya tiene planificadas. Si algún día supera el límite y el "
+            "usuario no permite sobrecarga → `409` con `error.details.conflicts` (una "
+            "entrada por día excedido). Si la permite, se crea y la respuesta trae "
+            "`data.conflicts` como advertencia.\n\n"
             "**Usado por el FE:** vista `/crear`. Tras un `201`, el FE navega al "
             "detalle del evento o a `/hoy` con un toast de confirmación."
         ),
@@ -303,6 +363,7 @@ class EventListCreateView(APIView):
             201: OpenApiResponse(response=EventSerializer, description="Evento creado con sus subtasks."),
             400: OpenApiResponse(description="Validación fallida (campos obligatorios, formato de fecha, subtask con fecha posterior al evento)."),
             401: OpenApiResponse(description="Sin token o token inválido."),
+            409: OpenApiResponse(description=CONFLICT_409_DESCRIPTION),
         },
         tags=["Eventos"],
     )
@@ -335,12 +396,20 @@ class EventListCreateView(APIView):
                 status.HTTP_400_BAD_REQUEST,
             )
 
+        conflicts, blocked = evaluate_new_subtasks(
+            request.user,
+            [(s["target_date"], s["estimated_hours"]) for s in subtasks_serializer.validated_data],
+        )
+        if blocked:
+            return overload_conflict_response(conflicts)
+
         event = serializer.save(user=request.user)
         for subtask_data in subtasks_serializer.validated_data:
             Subtask.objects.create(event=event, **subtask_data)
-        return success_response(
-            EventSerializer(event).data, "Evento creado.", status.HTTP_201_CREATED
-        )
+        data = EventSerializer(event).data
+        if conflicts:
+            data["conflicts"] = conflicts
+        return success_response(data, "Evento creado.", status.HTTP_201_CREATED)
 
 
 class EventDetailView(APIView):
@@ -564,37 +633,36 @@ class TodayView(APIView):
 # -----------------------------------------------------------------------------
 
 class DailyLimitView(APIView):
-    """Lee o actualiza el límite diario de horas del usuario actual/demo."""
-
-    @staticmethod
-    def _settings(request):
-        return UserSettings.objects.get_or_create(user=request.user)[0]
+    """Lee o actualiza el límite diario de horas del usuario autenticado (US-12)."""
 
     @extend_schema(
-        summary="Consultar límite diario de horas",
+        summary="Consultar límite diario de horas (US-12)",
         description=(
             "Devuelve el límite diario de horas de gestión configurado por el usuario "
             "(por defecto **6** si no lo ha modificado).\n\n"
             "Este valor se usa en **US-07** para detectar sobrecarga cuando se "
-            "reprograman gestiones.\n\n"
+            "crean o reprograman gestiones.\n\n"
             "**Usado por el FE:** pantalla de configuración. El FE lo llama al "
             "montar la vista para mostrar el valor actual."
         ),
         responses={
-            200: OpenApiResponse(description="Valor actual del límite diario."),
+            200: OpenApiResponse(description="Valor actual del límite diario: `{ daily_limit_hours }`."),
             401: OpenApiResponse(description="Sin token o token inválido."),
         },
         tags=["Configuración"],
     )
     def get(self, request):
-        return success_response({"daily_limit_hours": self._settings(request).daily_limit_hours})
+        return success_response({"daily_limit_hours": get_user_settings(request.user).daily_limit_hours})
 
     @extend_schema(
-        summary="Actualizar límite diario de horas",
+        summary="Actualizar límite diario de horas (US-12)",
         description=(
-            "Actualiza el límite diario de horas de gestión del usuario.\n\n"
+            "Actualiza el límite diario de horas de gestión del usuario. `PUT` y `PATCH` "
+            "se comportan igual (el backlog pide `PUT`; el FE actual usa `PATCH`).\n\n"
             "**Rango válido:** entre 1 y 16 horas, con un decimal como máximo.\n"
-            "Valores fuera de rango → `400`.\n\n"
+            "Valores fuera de rango → `400` con el mensaje "
+            "\"El límite debe estar entre 1 y 16 horas.\"\n\n"
+            "A partir de este cambio, la detección de conflicto (US-07) usa el nuevo valor.\n\n"
             "**Usado por el FE:** input numérico en la pantalla de configuración. "
             "Se llama al guardar y muestra un toast de confirmación."
         ),
@@ -608,7 +676,7 @@ class DailyLimitView(APIView):
         },
         tags=["Configuración"],
     )
-    def patch(self, request):
+    def put(self, request):
         value = request.data.get("daily_limit_hours")
         try:
             value = Decimal(str(value))
@@ -616,10 +684,245 @@ class DailyLimitView(APIView):
             return error_response("validation_error", "El límite debe ser numérico.", {"daily_limit_hours": ["Ingresa un número entre 1 y 16."]}, status.HTTP_400_BAD_REQUEST)
         if not value.is_finite() or not Decimal("1") <= value <= Decimal("16") or value.as_tuple().exponent < -1:
             return error_response("validation_error", "El límite debe estar entre 1 y 16 horas.", {"daily_limit_hours": ["Ingresa un número entre 1 y 16."]}, status.HTTP_400_BAD_REQUEST)
-        settings = self._settings(request)
+        settings = get_user_settings(request.user)
         settings.daily_limit_hours = value
         settings.save(update_fields=["daily_limit_hours"])
         return success_response({"daily_limit_hours": value}, "Límite diario actualizado.")
+
+    @extend_schema(
+        summary="Actualizar límite diario de horas (US-12, alias de PUT)",
+        description="Igual que `PUT /settings/daily-limit`. Se mantiene porque el frontend actual lo usa.",
+        request=inline_serializer(
+            name="DailyLimitPatchRequest",
+            fields={"daily_limit_hours": serializers.DecimalField(max_digits=4, decimal_places=1)},
+        ),
+        responses={
+            200: OpenApiResponse(description="Límite actualizado."),
+            400: OpenApiResponse(description="Valor no numérico, fuera de rango, o con demasiados decimales."),
+        },
+        tags=["Configuración"],
+    )
+    def patch(self, request):
+        return self.put(request)
+
+
+class UserSettingsView(APIView):
+    """GET/PATCH /api/settings — todas las preferencias del usuario."""
+
+    @extend_schema(
+        summary="Consultar preferencias del usuario",
+        description=(
+            "Devuelve todas las preferencias del usuario autenticado:\n"
+            "- `daily_limit_hours`: límite diario de horas de gestión (US-12, default 6).\n"
+            "- `allow_overload`: si es `true`, se permite programar gestiones en un día "
+            "aunque se supere el límite (el conflicto llega como advertencia en la "
+            "respuesta en vez de un `409`). **Por defecto `false`.**\n\n"
+            "**Usado por el FE:** pantalla de configuración/perfil."
+        ),
+        responses={
+            200: OpenApiResponse(response=UserSettingsSerializer, description="Preferencias actuales."),
+            401: OpenApiResponse(description="Sin token o token inválido."),
+        },
+        tags=["Configuración"],
+    )
+    def get(self, request):
+        return success_response(UserSettingsSerializer(get_user_settings(request.user)).data)
+
+    @extend_schema(
+        summary="Actualizar preferencias del usuario",
+        description=(
+            "Actualiza **parcialmente** las preferencias: se puede enviar solo "
+            "`allow_overload`, solo `daily_limit_hours` o ambos.\n\n"
+            "**Validaciones:**\n"
+            "- `daily_limit_hours`: entre 1 y 16, máximo un decimal → si no, `400`.\n"
+            "- `allow_overload`: booleano → si no, `400`.\n\n"
+            "Ejemplo: `{ \"allow_overload\": true }`."
+        ),
+        request=UserSettingsSerializer,
+        responses={
+            200: OpenApiResponse(response=UserSettingsSerializer, description="Preferencias actualizadas."),
+            400: OpenApiResponse(description="Validación fallida."),
+            401: OpenApiResponse(description="Sin token o token inválido."),
+        },
+        tags=["Configuración"],
+    )
+    def patch(self, request):
+        settings = get_user_settings(request.user)
+        serializer = UserSettingsSerializer(settings, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return error_response(
+                "validation_error",
+                "Revisa tus preferencias.",
+                validation_details(serializer.errors),
+                status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save()
+        return success_response(serializer.data, "Preferencias actualizadas.")
+
+
+# -----------------------------------------------------------------------------
+# Conflictos de sobrecarga (US-07 / US-08)
+# -----------------------------------------------------------------------------
+
+class OverloadCheckView(APIView):
+    """POST /api/conflicts/overload — simula una gestión en un día sin guardar nada."""
+
+    class InputSerializer(serializers.Serializer):
+        target_date = serializers.DateField(
+            error_messages={
+                "required": "Ingresa una fecha válida.",
+                "null": "Ingresa una fecha válida.",
+                "invalid": "Ingresa una fecha válida.",
+            }
+        )
+        estimated_hours = serializers.DecimalField(
+            max_digits=5, decimal_places=2, required=False,
+            min_value=Decimal("0.01"),
+            error_messages={"min_value": "Las horas deben ser mayores a 0."},
+        )
+        subtask_id = serializers.IntegerField(required=False)
+
+    @extend_schema(
+        summary="Verificar sobrecarga diaria (US-07)",
+        description=(
+            "Calcula, **sin guardar nada**, cómo quedaría la carga de un día si se "
+            "programa ahí una gestión. Pensado para llamarlo antes de confirmar una "
+            "reprogramación (o en vivo mientras el usuario ajusta horas, US-08).\n\n"
+            "**Body:**\n"
+            "- `target_date` (obligatorio): día a evaluar, `YYYY-MM-DD`.\n"
+            "- `subtask_id` (opcional): gestión existente que se movería/editaría. "
+            "Sus horas actuales no se cuentan dos veces.\n"
+            "- `estimated_hours` (opcional si se envía `subtask_id`): horas a sumar. "
+            "Si se omite, se usan las de la gestión.\n\n"
+            "**Cálculo:** `planned_hours = SUM(estimated_hours)` de las gestiones del "
+            "usuario en ese día (excluyendo `EJECUTADA` y la propia `subtask_id`) + "
+            "`estimated_hours`. `has_conflict = planned_hours > limit_hours` "
+            "(llegar exactamente al límite **no** es conflicto).\n\n"
+            "Ejemplo: límite 6h, día con 5h, mover gestión de 2h → "
+            "`planned_hours: 7, exceeds_by: 1, has_conflict: true, "
+            "message: \"Quedarías con 7h de gestión planificadas (límite 6h)\"`."
+        ),
+        request=InputSerializer,
+        responses={
+            200: OpenApiResponse(response=CONFLICT_REPORT_SCHEMA, description="Reporte de carga del día."),
+            400: OpenApiResponse(description="Fecha inválida, horas ≤ 0, o falta `estimated_hours` sin `subtask_id`."),
+            404: OpenApiResponse(description="`subtask_id` no existe o no pertenece al usuario."),
+        },
+        tags=["Conflictos"],
+    )
+    def post(self, request):
+        serializer = self.InputSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(
+                "validation_error",
+                "No pudimos verificar tu carga del día.",
+                validation_details(serializer.errors),
+                status.HTTP_400_BAD_REQUEST,
+            )
+        data = serializer.validated_data
+        subtask = None
+        if "subtask_id" in data:
+            subtask = Subtask.objects.filter(pk=data["subtask_id"], event__user=request.user).first()
+            if subtask is None:
+                return error_response("not_found", "Gestión no encontrada.", status_code=404)
+        hours = data.get("estimated_hours", subtask.estimated_hours if subtask else None)
+        if hours is None:
+            return error_response(
+                "validation_error",
+                "No pudimos verificar tu carga del día.",
+                {"estimated_hours": ["Envía las horas estimadas o el id de la gestión."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+        report = check_day(
+            request.user,
+            data["target_date"],
+            hours,
+            exclude_subtask_id=subtask.pk if subtask else None,
+        )
+        return success_response(report)
+
+
+class OverloadSuggestionsView(APIView):
+    """GET /api/conflicts/suggestions — próximos días con capacidad libre (US-08)."""
+
+    @extend_schema(
+        summary="Sugerir días con capacidad libre (US-08)",
+        description=(
+            "Devuelve los próximos días en los que cabe una gestión sin superar el "
+            "límite diario del usuario. Sirve para la opción \"mover a otro día\" "
+            "del modal de conflicto.\n\n"
+            "**Reglas:**\n"
+            "- Se busca desde `from` (por defecto hoy) día por día.\n"
+            "- Si se envía `subtask_id`, la búsqueda termina en la fecha de su evento "
+            "(no se puede programar después) y sus horas actuales no cuentan.\n"
+            "- Sin `subtask_id`, la búsqueda cubre 30 días.\n"
+            "- Lista vacía = no hay días sugeridos → el FE debe permitir selección manual."
+        ),
+        parameters=[
+            OpenApiParameter("subtask_id", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False,
+                             description="Gestión a mover. Si se omite `hours` se usan sus horas."),
+            OpenApiParameter("hours", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False,
+                             description="Horas a ubicar (obligatorio si no hay `subtask_id`)."),
+            OpenApiParameter("from", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False,
+                             description="Primer día a evaluar (`YYYY-MM-DD`). Default: hoy."),
+            OpenApiParameter("limit", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False,
+                             description="Cantidad máxima de sugerencias (1–10, default 3)."),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="DaySuggestion",
+                    fields={
+                        "date": serializers.DateField(),
+                        "current_hours": serializers.FloatField(),
+                        "planned_hours": serializers.FloatField(),
+                        "available_hours": serializers.FloatField(),
+                        "limit_hours": serializers.FloatField(),
+                    },
+                    many=True,
+                ),
+                description="Días sugeridos (puede ser lista vacía).",
+            ),
+            400: OpenApiResponse(description="Parámetros inválidos."),
+            404: OpenApiResponse(description="`subtask_id` no existe o no pertenece al usuario."),
+        },
+        tags=["Conflictos"],
+    )
+    def get(self, request):
+        params = request.query_params
+        try:
+            hours = Decimal(params["hours"]) if params.get("hours") else None
+            start = date.fromisoformat(params["from"]) if params.get("from") else None
+            limit = min(max(int(params.get("limit", 3)), 1), 10)
+            subtask_id = int(params["subtask_id"]) if params.get("subtask_id") else None
+        except (ValueError, InvalidOperation):
+            return error_response("validation_error", "Parámetros inválidos.", status_code=400)
+        if hours is not None and (not hours.is_finite() or hours <= 0):
+            return error_response(
+                "validation_error",
+                "Parámetros inválidos.",
+                {"hours": ["Las horas deben ser mayores a 0."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        end = None
+        if subtask_id is not None:
+            subtask = Subtask.objects.filter(pk=subtask_id, event__user=request.user).select_related("event").first()
+            if subtask is None:
+                return error_response("not_found", "Gestión no encontrada.", status_code=404)
+            hours = hours if hours is not None else subtask.estimated_hours
+            end = subtask.event.event_datetime.date()
+        if hours is None:
+            return error_response(
+                "validation_error",
+                "Parámetros inválidos.",
+                {"hours": ["Envía las horas o el id de la gestión."]},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        return success_response(
+            suggest_days(request.user, hours, start=start, end=end, exclude_subtask_id=subtask_id, limit=limit)
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -669,15 +972,20 @@ class SubtaskListCreateView(APIView):
             "- `estimated_hours` debe ser mayor a 0.\n"
             "- `target_date` **no puede ser posterior** a la fecha del evento. "
             "Si lo es → `400 target_date_after_event`.\n"
-            "- El `status` siempre arranca en `PENDIENTE`, ignorando lo que llegue en el body.\n\n"
+            "- El `status` siempre arranca en `PENDIENTE`, ignorando lo que llegue en el body.\n"
+            "- **Sobrecarga diaria (US-07):** si sumar `estimated_hours` al día "
+            "`target_date` supera el límite del usuario y este no permite sobrecarga → "
+            "`409 overload_conflict`. Si la permite, se crea y `data.conflict` trae el "
+            "reporte como advertencia (`null` si no hay conflicto).\n\n"
             "**Usado por el FE:** vista `/evento/:id/gestiones/crear`. Tras un `201`, "
             "el FE muestra el modal `CreateSubtaskSuccessModal` y refresca el detalle."
         ),
         request=SubtaskSerializer,
         responses={
-            201: OpenApiResponse(response=SubtaskSerializer, description="Gestión creada."),
+            201: OpenApiResponse(response=SubtaskSerializer, description="Gestión creada. Incluye `conflict` (reporte o `null`)."),
             400: OpenApiResponse(description="Validación fallida (nombre vacío, horas ≤ 0, fecha posterior al evento)."),
             404: OpenApiResponse(description="Evento no encontrado o no pertenece al usuario."),
+            409: OpenApiResponse(description=CONFLICT_409_DESCRIPTION),
         },
         tags=["Gestiones"],
     )
@@ -699,18 +1007,20 @@ class SubtaskListCreateView(APIView):
         target_date = serializer.validated_data["target_date"]
         event_date = event.event_datetime.date()
         if target_date > event_date:
-            return error_response(
-                "target_date_after_event",
-                "La fecha objetivo no puede ser posterior a la fecha del evento.",
-                {"target_date": [f"Debe ser igual o anterior al {event_date.isoformat()}."]},
-                status.HTTP_400_BAD_REQUEST,
-            )
+            return target_date_after_event_response(event_date)
+
+        # US-07: la gestión nueva suma horas a su día.
+        conflicts, blocked = evaluate_new_subtasks(
+            request.user, [(target_date, serializer.validated_data["estimated_hours"])]
+        )
+        if blocked:
+            return overload_conflict_response(conflicts)
 
         # status siempre arranca en PENDIENTE, sin importar lo que llegue en el body
         subtask = serializer.save(event=event, status=Subtask.Status.PENDIENTE)
-        return success_response(
-            SubtaskSerializer(subtask).data, "Gestión agregada.", status.HTTP_201_CREATED
-        )
+        data = SubtaskSerializer(subtask).data
+        data["conflict"] = conflicts[0] if conflicts else None
+        return success_response(data, "Gestión agregada.", status.HTTP_201_CREATED)
 
 
 class SubtaskDetailView(APIView):
@@ -723,23 +1033,47 @@ class SubtaskDetailView(APIView):
         return Subtask.objects.filter(pk=pk, event__user=user).first()
 
     @extend_schema(
-        summary="Editar gestión (US-03)",
+        summary="Editar / reprogramar gestión (US-03, US-06, US-07, US-08)",
         description=(
             "Actualiza **parcialmente** una gestión. Solo se modifican los campos "
             "enviados en el body.\n\n"
             "**Uso típico:**\n"
             "- Marcar como ejecutada: `{ \"status\": \"EJECUTADA\" }` (US-09).\n"
             "- Posponer con nota: `{ \"status\": \"POSPUESTA\", \"note\": \"...\" }` (US-09).\n"
-            "- Reprogramar: `{ \"target_date\": \"YYYY-MM-DD\" }` (US-06).\n"
-            "- Cambiar horas: `{ \"estimated_hours\": 2.5 }`.\n\n"
+            "- Reprogramar: `{ \"target_date\": \"YYYY-MM-DD\" }` (US-06 / US-08 mover).\n"
+            "- Cambiar horas: `{ \"estimated_hours\": 2.5 }` (US-08 reducir).\n\n"
+            "**Validación de fecha (US-06):** si se envía `target_date` debe ser una fecha "
+            "`YYYY-MM-DD` válida (vacía, `null` o con otro formato → `400` con "
+            "`details.target_date = [\"Ingresa una fecha válida.\"]`) y no puede ser "
+            "posterior a la fecha del evento (`400 target_date_after_event`). "
+            "Se permiten fechas pasadas.\n\n"
+            "**Sobrecarga diaria (US-07/08):** si cambian `target_date`, `estimated_hours` "
+            "o `status`, se recalcula la carga del día destino "
+            "(SUM de `estimated_hours` del usuario ese día, sin las `EJECUTADA`).\n"
+            "- Si el cambio **aumenta** la carga del día, el total supera el límite y el "
+            "usuario tiene `allow_overload=false` → `409 overload_conflict`, no se guarda.\n"
+            "- Reducir horas o sacar la gestión de un día **nunca se bloquea**; si el día "
+            "sigue excedido se guarda y `data.conflict.message` dice "
+            "\"Aún quedarías con Xh (límite Yh)\".\n"
+            "- La respuesta `200` incluye `data.conflict` (reporte del día destino con "
+            "`resolved: true/false` y los nuevos totales, o `null` si no aplica) y, si "
+            "cambió la fecha, `data.previous_day` con los totales del día que se liberó.\n\n"
             "**Usado por el FE:** botones Hecha, Posponer y Reprogramar en "
             "`/hoy` y `/evento/:id`; también el modal `EditSubtaskModal`."
         ),
         request=SubtaskSerializer,
         responses={
-            200: OpenApiResponse(response=SubtaskSerializer, description="Gestión actualizada."),
-            400: OpenApiResponse(description="Validación fallida."),
+            200: OpenApiResponse(
+                response=SubtaskSerializer,
+                description=(
+                    "Gestión actualizada. `message` es \"Fecha actualizada.\" si cambió "
+                    "`target_date`, si no \"Cambios guardados.\". Incluye `conflict` y, "
+                    "si cambió la fecha, `previous_day`."
+                ),
+            ),
+            400: OpenApiResponse(description="Validación fallida (fecha inválida, fecha posterior al evento, horas ≤ 0)."),
             404: OpenApiResponse(description="Gestión no encontrada o no pertenece al usuario."),
+            409: OpenApiResponse(description=CONFLICT_409_DESCRIPTION),
         },
         tags=["Gestiones"],
     )
@@ -755,8 +1089,38 @@ class SubtaskDetailView(APIView):
                 validation_details(serializer.errors),
                 status.HTTP_400_BAD_REQUEST,
             )
+
+        validated = serializer.validated_data
+        old_date = subtask.target_date
+        new_date = validated.get("target_date", subtask.target_date)
+        new_hours = validated.get("estimated_hours", subtask.estimated_hours)
+        new_status = validated.get("status", subtask.status)
+
+        if "target_date" in validated:
+            event_date = subtask.event.event_datetime.date()
+            if new_date > event_date:
+                return target_date_after_event_response(event_date)
+
+        report = None
+        if {"target_date", "estimated_hours", "status"} & validated.keys():
+            report, blocked = evaluate_subtask_change(subtask, new_date, new_hours, new_status)
+            if blocked:
+                return overload_conflict_response([report])
+
         serializer.save()
-        return success_response(serializer.data, "Cambios guardados.")
+        data = serializer.data
+        data["conflict"] = report
+        date_changed = new_date != old_date
+        if date_changed:
+            settings = get_user_settings(request.user)
+            freed_hours = day_load(request.user, old_date)
+            data["previous_day"] = {
+                "date": old_date.isoformat(),
+                "planned_hours": float(freed_hours),
+                "limit_hours": float(settings.daily_limit_hours),
+                "has_conflict": freed_hours > settings.daily_limit_hours,
+            }
+        return success_response(data, "Fecha actualizada." if date_changed else "Cambios guardados.")
 
     @extend_schema(
         summary="Eliminar gestión (US-03)",

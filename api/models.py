@@ -77,10 +77,17 @@ class Subtask(models.Model):
 
 
 class UserSettings(models.Model):
-    """Preferencias persistidas del usuario (por ahora, usuario demo)."""
+    """Preferencias persistidas del usuario"""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="convoka_settings")
     daily_limit_hours = models.DecimalField(max_digits=4, decimal_places=1, default=6)
+    # Si es True, se permite guardar una gestión en un día aunque supere el
+    # límite diario (el conflicto se informa como advertencia, no bloquea).
+    allow_overload = models.BooleanField(
+        "permitir sobrecarga diaria",
+        default=False,
+        help_text="Permite programar gestiones en un día aunque se supere el límite diario.",
+    )
 
     def __str__(self):
         return f"Preferencias de {self.user}"
