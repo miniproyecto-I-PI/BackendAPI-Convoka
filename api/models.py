@@ -88,6 +88,20 @@ class UserSettings(models.Model):
         default=False,
         help_text="Permite programar gestiones en un día aunque se supere el límite diario.",
     )
+    # Si es True, una gestión puede quedar con fecha posterior a la de su evento
+    # (al crearla, reprogramarla o al mover el evento a una fecha anterior).
+    allow_subtasks_after_event = models.BooleanField(
+        "permitir gestiones después del evento",
+        default=False,
+        help_text="Permite que una gestión tenga fecha posterior a la fecha de su evento.",
+    )
+    # Si es True, se pueden crear o reprogramar gestiones con fecha anterior a hoy
+    # (pensado para pruebas).
+    allow_overdue_subtasks = models.BooleanField(
+        "permitir gestiones vencidas",
+        default=False,
+        help_text="Permite crear o reprogramar gestiones con fecha anterior a hoy.",
+    )
 
     def __str__(self):
         return f"Preferencias de {self.user}"
