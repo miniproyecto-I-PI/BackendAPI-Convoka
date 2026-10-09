@@ -1,10 +1,22 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from ..models import Event, Subtask
 
 User = get_user_model()
+
+
+def day(offset):
+    """Fecha ISO relativa a hoy (los tests no pueden usar fechas que ya pasaron)."""
+    return (timezone.localdate() + timedelta(days=offset)).isoformat()
+
+
+def moment(offset):
+    return (timezone.now() + timedelta(days=offset)).isoformat()
 
 
 class AuthMixin:
@@ -30,7 +42,7 @@ class EventTests(AuthMixin, APITestCase):
             "name": "Boda de Juan y María",
             "type": "BODA",
             "client_contact": "Juan Pérez",
-            "event_datetime": "2026-12-05T18:00:00Z",
+            "event_datetime": moment(60),
             "place": "Salón Los Almendros",
         }
 
@@ -65,8 +77,8 @@ class EventTests(AuthMixin, APITestCase):
     def test_progress_en_lista_y_detalle(self):
         created = self.client.post("/api/events", {
             **self._valid_payload(), "subtasks": [
-                {"name": "A", "target_date": "2026-10-01", "estimated_hours": 1},
-                {"name": "B", "target_date": "2026-10-02", "estimated_hours": 2},
+                {"name": "A", "target_date": day(1), "estimated_hours": 1},
+                {"name": "B", "target_date": day(2), "estimated_hours": 2},
             ],
         }, format="json")
         event_id = created.data["data"]["id"]
@@ -93,11 +105,11 @@ class EventWithInitialSubtasksTests(AuthMixin, APITestCase):
         return {
             "name": "Boda con plan logístico",
             "type": "BODA",
-            "event_datetime": "2026-12-05T18:00:00-05:00",
+            "event_datetime": moment(60),
             "subtasks": [
-                {"name": "Reservar salón", "target_date": "2026-10-01", "estimated_hours": 4},
-                {"name": "Enviar invitaciones", "target_date": "2026-10-15", "estimated_hours": 2},
-                {"name": "Confirmar catering", "target_date": "2026-11-01", "estimated_hours": 3},
+                {"name": "Reservar salón", "target_date": day(1), "estimated_hours": 4},
+                {"name": "Enviar invitaciones", "target_date": day(10), "estimated_hours": 2},
+                {"name": "Confirmar catering", "target_date": day(20), "estimated_hours": 3},
             ],
         }
 
@@ -133,14 +145,14 @@ class SubtaskTests(AuthMixin, APITestCase):
             {
                 "name": "Boda de Juan y María",
                 "type": "BODA",
-                "event_datetime": "2026-12-05T18:00:00Z",
+                "event_datetime": moment(60),
             },
             format="json",
         )
         self.event_id = response.data["data"]["id"]
 
     def _valid_payload(self):
-        return {"name": "Reservar salón", "target_date": "2026-10-01", "estimated_hours": 4}
+        return {"name": "Reservar salón", "target_date": day(1), "estimated_hours": 4}
 
     def test_crear_subtarea_valida(self):
         response = self.client.post(
@@ -192,14 +204,14 @@ class EditDeleteTests(AuthMixin, APITestCase):
             {
                 "name": "Cumpleaños de Ana",
                 "type": "CUMPLEANOS",
-                "event_datetime": "2026-11-01T20:00:00Z",
+                "event_datetime": moment(30),
             },
             format="json",
         )
         self.event_id = response.data["data"]["id"]
         response = self.client.post(
             f"/api/events/{self.event_id}/subtasks",
-            {"name": "Enviar invitaciones", "target_date": "2026-10-15", "estimated_hours": 2},
+            {"name": "Enviar invitaciones", "target_date": day(10), "estimated_hours": 2},
             format="json",
         )
         self.subtask_id = response.data["data"]["id"]
@@ -236,8 +248,8 @@ class ConnectedEndpointsTests(AuthMixin, APITestCase):
 
     def test_today_devuelve_gestiones_pendientes_con_datos_del_evento(self):
         response = self.client.post("/api/events", {
-            "name": "Evento de prueba", "type": "SOCIAL", "event_datetime": "2026-12-05T18:00:00Z",
-            "subtasks": [{"name": "Enviar invitaciones", "target_date": "2026-10-01", "estimated_hours": 2}],
+            "name": "Evento de prueba", "type": "SOCIAL", "event_datetime": moment(60),
+            "subtasks": [{"name": "Enviar invitaciones", "target_date": day(1), "estimated_hours": 2}],
         }, format="json")
         self.assertEqual(response.status_code, 201)
         today = self.client.get("/api/today")

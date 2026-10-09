@@ -137,6 +137,23 @@ def evaluate_new_subtasks(user, items):
     return reports, blocked
 
 
+def days_over_limit(user, limit, start=None):
+    """
+    Días desde `start` (por defecto hoy) cuya carga supera `limit`.
+    Se usa para no dejar bajar el límite diario por debajo de lo ya planificado.
+    """
+    start = start or timezone.localdate()
+    rows = (
+        Subtask.objects.filter(event__user=user, target_date__gte=start)
+        .exclude(status=Subtask.Status.EJECUTADA)
+        .values("target_date")
+        .annotate(total=Sum("estimated_hours"))
+        .filter(total__gt=limit)
+        .order_by("target_date")
+    )
+    return [{"date": row["target_date"].isoformat(), "planned_hours": float(row["total"])} for row in rows]
+
+
 def suggest_days(user, hours, start=None, end=None, exclude_subtask_id=None, limit=3):
     """
     Próximos días (desde `start`, por defecto hoy) donde `hours` cabe sin

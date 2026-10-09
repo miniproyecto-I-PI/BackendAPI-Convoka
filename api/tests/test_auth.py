@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
+from .test_events import moment
+
 User = get_user_model()
 
 
@@ -60,7 +62,7 @@ class AuthTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {token_a}")
         res = self.client.post(
             "/api/events",
-            {"name": "Boda A", "type": "BODA", "event_datetime": "2026-05-01T18:00:00Z"},
+            {"name": "Boda A", "type": "BODA", "event_datetime": moment(60)},
             format="json",
         )
         self.assertEqual(res.status_code, 201)

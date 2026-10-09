@@ -154,13 +154,15 @@ class RescheduleTests(Sprint3Base):
         groups = {item["id"]: item["group"] for item in self.client.get("/api/today").data["data"]}
         self.assertEqual(groups[task.id], "hoy")
 
-    def test_fecha_pasada_permitida(self):
+    def test_fecha_pasada_solo_con_preferencia(self):
         task = self.task(2)
-        res = self.client.patch(
-            self.url(task),
-            {"target_date": (self.today - timedelta(days=5)).isoformat()},
-            format="json",
-        )
+        payload = {"target_date": (self.today - timedelta(days=5)).isoformat()}
+        res = self.client.patch(self.url(task), payload, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data["error"]["code"], "target_date_in_past")
+
+        UserSettings.objects.filter(user=self.user).update(allow_overdue_subtasks=True)
+        res = self.client.patch(self.url(task), payload, format="json")
         self.assertEqual(res.status_code, 200)
 
     def test_fecha_invalida_o_vacia(self):
@@ -392,7 +394,15 @@ class CreateSubtaskConflictTests(Sprint3Base):
 class SettingsTests(Sprint3Base):
     def test_default_y_actualizacion(self):
         res = self.client.get("/api/settings")
-        self.assertEqual(res.data["data"], {"daily_limit_hours": 6, "allow_overload": False})
+        self.assertEqual(
+            res.data["data"],
+            {
+                "daily_limit_hours": 6,
+                "allow_overload": False,
+                "allow_subtasks_after_event": False,
+                "allow_overdue_subtasks": False,
+            },
+        )
         res = self.client.patch("/api/settings", {"allow_overload": True}, format="json")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["data"]["allow_overload"])

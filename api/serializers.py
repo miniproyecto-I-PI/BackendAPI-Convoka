@@ -30,10 +30,23 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         required=False,
         error_messages={"invalid": "Debe ser true o false."},
     )
+    allow_subtasks_after_event = serializers.BooleanField(
+        required=False,
+        error_messages={"invalid": "Debe ser true o false."},
+    )
+    allow_overdue_subtasks = serializers.BooleanField(
+        required=False,
+        error_messages={"invalid": "Debe ser true o false."},
+    )
 
     class Meta:
         model = UserSettings
-        fields = ["daily_limit_hours", "allow_overload"]
+        fields = [
+            "daily_limit_hours",
+            "allow_overload",
+            "allow_subtasks_after_event",
+            "allow_overdue_subtasks",
+        ]
 
     def validate_daily_limit_hours(self, value):
         if not Decimal("1") <= value <= Decimal("16"):
