@@ -122,6 +122,14 @@ class SubtaskSerializer(serializers.ModelSerializer):
         required=False,
     )
 
+    status = serializers.ChoiceField(
+        choices=Subtask.Status.choices,
+        required=False,
+        error_messages={
+            "invalid_choice": "Estado no válido. Opciones permitidas: PENDIENTE, EJECUTADA, POSPUESTA.",
+        },
+    )
+
     class Meta:
         model = Subtask
         fields = [
@@ -133,11 +141,12 @@ class SubtaskSerializer(serializers.ModelSerializer):
             "estimated_hours",
             "status",
             "note",
-            "provider", 
+            "provider",
+            "done_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "event", "created_at", "updated_at"]
+        read_only_fields = ["id", "event", "done_at", "created_at", "updated_at"]
 
     def validate_name(self, value):
         if not value.strip():
