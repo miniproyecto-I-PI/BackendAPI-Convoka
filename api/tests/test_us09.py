@@ -106,7 +106,9 @@ class SubtaskStatusUS09Tests(APITestCase):
         self.assertIn(self.subtask.id, task_ids_before)
 
         # La marcamos como EJECUTADA
-        self.client.patch(f"/api/subtasks/{self.subtask.id}", {"status": "EJECUTADA"}, format="json")
+        self.client.patch(
+            f"/api/subtasks/{self.subtask.id}", {"status": "EJECUTADA"}, format="json"
+        )
 
         # Ahora en /today ya NO debe aparecer
         res_after = self.client.get("/api/today")
@@ -154,11 +156,14 @@ class SubtaskStatusUS09Tests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_ejecutada_deja_de_contar_en_conflicto_sobrecarga(self):
-        """Criterio QA: Verificar que EJECUTADA deja de contar en el cálculo de conflicto (US-07)."""
+        """
+        Criterio QA: Verificar que EJECUTADA deja de contar en el cálculo
+        de conflicto (US-07).
+        """
         UserSettings.objects.create(user=self.user, daily_limit_hours=Decimal("6.0"))
 
         # Creamos una segunda gestión para hoy de 4h (total 3h + 4h = 7h > 6h)
-        subtask2 = Subtask.objects.create(
+        Subtask.objects.create(
             event=self.event,
             name="Degustación menú",
             target_date=self.today,
@@ -177,7 +182,9 @@ class SubtaskStatusUS09Tests(APITestCase):
         self.assertEqual(check_res.data["data"]["current_hours"], 7.0)
 
         # Marcamos self.subtask (3.0h) como EJECUTADA
-        patch_res = self.client.patch(f"/api/subtasks/{self.subtask.id}", {"status": "EJECUTADA"}, format="json")
+        patch_res = self.client.patch(
+            f"/api/subtasks/{self.subtask.id}", {"status": "EJECUTADA"}, format="json"
+        )
         self.assertEqual(patch_res.status_code, status.HTTP_200_OK)
 
         # Ahora las horas actuales del día deben ser solo 4.0h (excluye las 3.0h de la ejecutada)

@@ -635,6 +635,160 @@ class EventDetailView(APIView):
         return success_response(message="Evento eliminado.")
 
 
+class EventProgressView(APIView):
+    """
+    GET /api/events/:id/progress (US-10)
+    Devuelve el avance de preparación de un evento: done, total, percent.
+    """
+
+    @extend_schema(
+        summary="Consultar progreso de preparación del evento (US-10)",
+        description=(
+            "Devuelve el porcentaje de avance y conteo de gestiones ejecutadas "
+            "respecto al total para un evento del usuario autenticado.\n\n"
+            "**Cálculo:**\n"
+            "- `done`: cantidad de subtareas con estado `EJECUTADA`.\n"
+            "- `total`: cantidad total de subtareas del evento.\n"
+            "- `percent`: `(done / total) * 100` redondeado a 1 decimal "
+            "(0.0 si no hay gestiones).\n\n"
+            "**Casos:**\n"
+            "- Evento sin gestiones: `done: 0, total: 0, percent: 0.0`.\n"
+            "- Si el evento no existe o no pertenece al usuario: `404 Not Found`."
+        ),
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="EventProgressResponse",
+                    fields={
+                        "event_id": serializers.IntegerField(),
+                        "event_name": serializers.CharField(),
+                        "done": serializers.IntegerField(),
+                        "total": serializers.IntegerField(),
+                        "percent": serializers.FloatField(),
+                    },
+                ),
+                description="Progreso de preparación del evento.",
+            ),
+            401: OpenApiResponse(description="Token ausente o inválido."),
+            404: OpenApiResponse(description="Evento no encontrado o no pertenece al usuario."),
+        },
+        tags=["Eventos"],
+    )
+    def get(self, request, event_id):
+        event = Event.objects.filter(pk=event_id, user=request.user).first()
+        if event is None:
+            return error_response("not_found", "Evento no encontrado.", status_code=404)
+
+        total = event.subtasks.count()
+        done = event.subtasks.filter(status=Subtask.Status.EJECUTADA).count()
+        percent = round((done / total) * 100, 1) if total > 0 else 0.0
+
+        return success_response(
+            {
+                "event_id": event.id,
+                "event_name": event.name,
+                "done": done,
+                "total": total,
+                "percent": percent,
+            }
+        )
+
+
+class AllEventsProgressView(APIView):
+    """
+    GET /api/progress (US-10 opcional)
+    Devuelve el progreso consolidado y detallado de todos los eventos del usuario.
+    """
+
+    @extend_schema(
+        summary="Consultar progreso global y por evento (US-10 opcional)",
+        description=(
+            "Devuelve un resumen global de todas las gestiones del usuario y el "
+            "desglose de progreso de cada uno de sus eventos activos.\n\n"
+            "Pensado para dashboards globales y la vista `/progreso`."
+        ),
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="GlobalProgressResponse",
+                    fields={
+                        "summary": inline_serializer(
+                            name="ProgressSummary",
+                            fields={
+                                "total_events": serializers.IntegerField(),
+                                "total_subtasks": serializers.IntegerField(),
+                                "total_done": serializers.IntegerField(),
+                                "global_percent": serializers.FloatField(),
+                            },
+                        ),
+                        "events": inline_serializer(
+                            name="EventProgressItem",
+                            fields={
+                                "event_id": serializers.IntegerField(),
+                                "event_name": serializers.CharField(),
+                                "event_type": serializers.CharField(),
+                                "event_datetime": serializers.DateTimeField(),
+                                "done": serializers.IntegerField(),
+                                "total": serializers.IntegerField(),
+                                "percent": serializers.FloatField(),
+                            },
+                            many=True,
+                        ),
+                    },
+                ),
+                description="Resumen de progreso del usuario.",
+            ),
+            401: OpenApiResponse(description="Token ausente o inválido."),
+        },
+        tags=["Eventos"],
+    )
+    def get(self, request):
+        events = events_with_progress(
+            Event.objects.filter(user=request.user).order_by("-event_datetime")
+        )
+        events_data = []
+        total_subtasks = 0
+        total_done = 0
+
+        for ev in events:
+            done = (
+                ev.progress_done
+                if hasattr(ev, "progress_done")
+                else ev.subtasks.filter(status=Subtask.Status.EJECUTADA).count()
+            )
+            tot = ev.progress_total if hasattr(ev, "progress_total") else ev.subtasks.count()
+            pct = round((done / tot) * 100, 1) if tot > 0 else 0.0
+            total_subtasks += tot
+            total_done += done
+            events_data.append(
+                {
+                    "event_id": ev.id,
+                    "event_name": ev.name,
+                    "event_type": ev.type,
+                    "event_datetime": ev.event_datetime.isoformat(),
+                    "done": done,
+                    "total": tot,
+                    "percent": pct,
+                }
+            )
+
+        global_percent = (
+            round((total_done / total_subtasks) * 100, 1) if total_subtasks > 0 else 0.0
+        )
+
+        return success_response(
+            {
+                "summary": {
+                    "total_events": len(events_data),
+                    "total_subtasks": total_subtasks,
+                    "total_done": total_done,
+                    "global_percent": global_percent,
+                },
+                "events": events_data,
+            }
+        )
+
+
 # -----------------------------------------------------------------------------
 # Vista Hoy (US-04 + US-05)
 # -----------------------------------------------------------------------------
