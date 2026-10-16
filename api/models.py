@@ -65,6 +65,7 @@ class Subtask(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDIENTE)
     note = models.CharField("nota", max_length=500, blank=True)
     provider = models.CharField("proveedor o encargado", max_length=200, blank=True) #Nuevo
+    done_at = models.DateTimeField("fecha y hora de ejecución", null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

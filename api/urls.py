@@ -1,40 +1,43 @@
 from django.urls import path
 
 from .views import (
+    AllEventsProgressView,
+    DailyLimitView,
     EventDetailView,
     EventListCreateView,
+    EventProgressView,
     HealthCheckView,
+    LoginView,
+    LogoutView,
+    MeView,
+    OverloadCheckView,
+    OverloadSuggestionsView,
+    RegisterView,
     SubtaskDetailView,
     SubtaskListCreateView,
     TodayView,
-    DailyLimitView,
-    LoginView,    
-    RegisterView,
-    LogoutView,    
-    MeView,        
-    OverloadCheckView,
-    OverloadSuggestionsView,
     UserSettingsView,
 )
 
 # Nota: sin "/" final a propósito, para calzar con el contrato del backlog
 # ("POST /events", no "POST /events/") y con services/api.js, que ya llama
 # a `${API_URL}/events` sin slash final.
-#Empiezan en /api/...
+# Empiezan en /api/...
 urlpatterns = [
     path("health/", HealthCheckView.as_view(), name="health-check"),
-    path("auth/login", LoginView.as_view(), name="auth-login"),    # login
-    path("auth/register", RegisterView.as_view(), name="auth-register"), #Registrar
-    path("auth/logout", LogoutView.as_view(), name="auth-logout"), # logout
-    path("auth/me", MeView.as_view(), name="auth-me"),             # página login
-
+    path("auth/login", LoginView.as_view(), name="auth-login"),  # login
+    path("auth/register", RegisterView.as_view(), name="auth-register"),  # Registrar
+    path("auth/logout", LogoutView.as_view(), name="auth-logout"),  # logout
+    path("auth/me", MeView.as_view(), name="auth-me"),  # página login
     path("events", EventListCreateView.as_view(), name="event-list-create"),
     path("today", TodayView.as_view(), name="today"),
+    path("progress", AllEventsProgressView.as_view(), name="all-events-progress"),
     path("settings", UserSettingsView.as_view(), name="user-settings"),
     path("settings/daily-limit", DailyLimitView.as_view(), name="daily-limit"),
     path("conflicts/overload", OverloadCheckView.as_view(), name="conflicts-overload"),
     path("conflicts/suggestions", OverloadSuggestionsView.as_view(), name="conflicts-suggestions"),
     path("events/<int:pk>", EventDetailView.as_view(), name="event-detail"),
+    path("events/<int:event_id>/progress", EventProgressView.as_view(), name="event-progress"),
     path(
         "events/<int:event_id>/subtasks",
         SubtaskListCreateView.as_view(),

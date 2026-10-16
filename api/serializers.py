@@ -1,7 +1,8 @@
-from rest_framework import serializers
-from django.contrib.auth import get_user_model
-
 from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema_field, inline_serializer
+from rest_framework import serializers
 
 from .models import Event, Subtask, UserSettings
 
@@ -53,6 +54,7 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(DAILY_LIMIT_MESSAGE)
         return value
 
+
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(required=True, allow_blank=False)
     password = serializers.CharField(write_only=True, min_length=8)
@@ -75,6 +77,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)  # hashea la password
 
+
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
@@ -84,13 +87,14 @@ class LoginSerializer(serializers.Serializer):
         identifier = (attrs.get("username") or attrs.get("email") or "").strip()
         password = attrs.get("password") or ""
         if not identifier or not password:
-            raise serializers.ValidationError({
-                "username": ["Ingresa tu usuario o correo."],
-                "password": ["Ingresa tu contraseña."],
-            })
+            raise serializers.ValidationError(
+                {
+                    "username": ["Ingresa tu usuario o correo."],
+                    "password": ["Ingresa tu contraseña."],
+                }
+            )
         attrs["identifier"] = identifier
         return attrs
-
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -122,6 +126,16 @@ class SubtaskSerializer(serializers.ModelSerializer):
         required=False,
     )
 
+    status = serializers.ChoiceField(
+        choices=Subtask.Status.choices,
+        required=False,
+        error_messages={
+            "invalid_choice": (
+                "Estado no válido. Opciones permitidas: PENDIENTE, EJECUTADA, POSPUESTA."
+            ),
+        },
+    )
+
     class Meta:
         model = Subtask
         fields = [
@@ -129,15 +143,16 @@ class SubtaskSerializer(serializers.ModelSerializer):
             "event",
             "name",
             "target_date",
-            "time", 
+            "time",
             "estimated_hours",
             "status",
             "note",
-            "provider", 
+            "provider",
+            "done_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "event", "created_at", "updated_at"]
+        read_only_fields = ["id", "event", "done_at", "created_at", "updated_at"]
 
     def validate_name(self, value):
         if not value.strip():
@@ -157,10 +172,28 @@ class EventSerializer(serializers.ModelSerializer):
     subtasks = SubtaskSerializer(many=True, read_only=True)
     progress = serializers.SerializerMethodField()
 
+    @extend_schema_field(
+        inline_serializer(
+            name="EventProgressInfo",
+            fields={
+                "done": serializers.IntegerField(),
+                "total": serializers.IntegerField(),
+                "percent": serializers.FloatField(),
+            },
+        )
+    )
     def get_progress(self, obj):
+        done = (
+            obj.progress_done
+            if hasattr(obj, "progress_done")
+            else obj.subtasks.filter(status=Subtask.Status.EJECUTADA).count()
+        )
+        total = obj.progress_total if hasattr(obj, "progress_total") else obj.subtasks.count()
+        percent = round((done / total) * 100, 1) if total > 0 else 0.0
         return {
-            "done": obj.progress_done if hasattr(obj, "progress_done") else obj.subtasks.filter(status=Subtask.Status.EJECUTADA).count(),
-            "total": obj.progress_total if hasattr(obj, "progress_total") else obj.subtasks.count(),
+            "done": done,
+            "total": total,
+            "percent": percent,
         }
 
     class Meta:
