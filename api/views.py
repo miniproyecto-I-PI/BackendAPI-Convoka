@@ -795,7 +795,7 @@ class AllEventsProgressView(APIView):
 
 
 class TodayView(APIView):
-    UPCOMING_DAYS = 7  # Decisión UX para "Próximas"
+    #UPCOMING_DAYS = 7  # Decisión UX para "Próximas"
 
     @extend_schema(
         summary="Listar gestiones para Hoy (US-04 + US-05)",
@@ -806,7 +806,7 @@ class TodayView(APIView):
             "**Agrupación (campo `group`):**\n"
             "- `vencidas`: `target_date` anterior a hoy (más antigua primero).\n"
             "- `hoy`: `target_date` igual a hoy.\n"
-            "- `proximas`: `target_date` posterior a hoy, hasta 7 días.\n"
+            "- `proximas`: `target_date` posterior a hoy, sin límite, antes 7 días.\n"
             "- `ejecutadas`: solo aparece cuando se filtra explícitamente con "
             "`?status=EJECUTADA`. Devuelve el histórico completo de gestiones "
             "completadas, sin límite de fecha.\n\n"
@@ -893,8 +893,8 @@ class TodayView(APIView):
             qs = qs.exclude(status=Subtask.Status.EJECUTADA)
 
         # El límite de 7 días no aplica al histórico de ejecutadas.
-        if status_param != Subtask.Status.EJECUTADA:
-            qs = qs.filter(target_date__lte=today + timedelta(days=self.UPCOMING_DAYS))
+        #if status_param != Subtask.Status.EJECUTADA:
+           # qs = qs.filter(target_date__lte=today + timedelta(days=self.UPCOMING_DAYS))
 
         # Sin hora cuenta como 00:00: va antes que las que sí tienen hora ese día.
         qs = qs.order_by(
